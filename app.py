@@ -8,7 +8,7 @@ st.set_page_config(page_title="RendVar", layout="wide")
 
 menu = st.sidebar.selectbox("Menu", ["Home", "Atualiza base de dados", "IFR2 - Ativo único", "IFR2 - Lista azul"])
 
-CAMINHO_IMAGENS = "A:/02-Projetos_Python/rendvar/02-imagens"
+CAMINHO_IMAGENS = "A:/02-Projetos_Python/rendvar/02-images"
 
 if menu == "Home":
     st.title("📊 Projeto RendVar")
@@ -19,7 +19,7 @@ if menu == "Home":
     """)
     try:
         imagem = Image.open(f"{CAMINHO_IMAGENS}/rendvar_banner.jpg")
-        st.image(imagem, use_column_width=True)
+        st.image(imagem, use_container_width=True)
     except FileNotFoundError:
         st.warning("Imagem não encontrada em /02-imagens.")
 
