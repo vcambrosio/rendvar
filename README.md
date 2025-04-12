@@ -11,4 +11,3 @@ Aplicação Streamlit para análise técnica com o setup IFR2.
 ---
 
 Este app será hospedado no Streamlit Cloud.
-
