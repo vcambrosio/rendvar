@@ -19,7 +19,6 @@ if not os.path.exists(parquet_path):
 df_base = pd.read_parquet(parquet_path)
 
 # === INTERFACE STREAMLIT ===
-# === INTERFACE STREAMLIT ===
 st.sidebar.header("📋 Filtros")
 # Primeiro selecionar a lista
 listas_disponiveis = sorted(df_base["Lista"].unique().tolist())

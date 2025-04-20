@@ -5,6 +5,7 @@ import os
 import plotly.graph_objects as go
 from datetime import timedelta
 import base64
+from io import BytesIO
 
 # Configuração da página
 st.set_page_config(page_title="Backtest IFR2 Múltiplo", layout="wide")
@@ -59,20 +60,20 @@ ifr_max = st.sidebar.slider(f"Valor máximo do IFR({periodo_ifr})", min_value=2,
 intervalo_ifr = list(range(ifr_min, ifr_max + 1))
 
 st.sidebar.header("📥 Critérios de Entrada Adicionais")
-usar_media = st.sidebar.checkbox("Usar Média Móvel como filtro adicional?")
+usar_media = st.sidebar.checkbox("Usar Média Móvel como filtro adicional?", value=True)
 if usar_media:
     media_periodos = st.sidebar.number_input("Períodos da Média Móvel", min_value=1, max_value=200, value=20)
 
 st.sidebar.header("📤 Critérios de Saída")
 max_candles_saida = st.sidebar.slider("Máxima dos últimos X candles", min_value=1, max_value=10, value=2)
-usar_timeout = st.sidebar.checkbox("Forçar saída após X candles?")
+usar_timeout = st.sidebar.checkbox("Forçar saída após X candles?", value=True)
 if usar_timeout:
     max_hold_days = st.sidebar.number_input("Forçar saída após X candles", min_value=1, max_value=20, value=5)
 else:
     max_hold_days = None
 
 st.sidebar.header("⚠️ Stop Loss")
-usar_stop = st.sidebar.checkbox("Usar Stop Loss?")
+usar_stop = st.sidebar.checkbox("Usar Stop Loss?", value=True)
 if usar_stop:
     stop_pct = st.sidebar.number_input("Stop Loss (% abaixo do preço de entrada)", min_value=0.1, max_value=50.0, value=5.0)
 else:
@@ -278,6 +279,11 @@ def backtest_ativo(ativo, df_filtrado, data_inicial, data_final,
         }
 
 # === EXECUÇÃO DO BACKTEST ===
+if 'backtest_executado' not in st.session_state:
+    st.session_state.backtest_executado = False
+    st.session_state.df_melhores = None
+    st.session_state.melhores_resultados = None
+
 if st.button("▶️ Executar Backtest Múltiplo"):
     if not ativos_escolhidos:
         st.warning("⚠️ Selecione pelo menos um ativo para continuar.")
@@ -343,176 +349,317 @@ if st.button("▶️ Executar Backtest Múltiplo"):
     # Ordenar por resultado percentual
     df_melhores = df_melhores.sort_values(by="Resultado (%)", ascending=False)
     
-    # Exibir resultados
-    st.subheader(f"📊 Melhores Resultados por Ativo - Lista: {lista_selecionada}")
+    # Salvar os resultados na sessão
+    st.session_state.backtest_executado = True
+    st.session_state.df_melhores = df_melhores
+    st.session_state.melhores_resultados = melhores_resultados
     
-    # Formatação para exibição
-    st.dataframe(
-        df_melhores.style.format({
-            "Lucro Total (R$)": "R$ {:.2f}",
-            "% Trades Lucrativos": "{:.2f}%",
-            "Resultado (%)": "{:.2f}%",
-            "Drawdown (%)": "{:.2f}%",
-            "Fator Lucro": "{:.2f}",
-            "Ganho Médio (R$)": "R$ {:.2f}",
-            "Perda Média (R$)": "R$ {:.2f}",
-            "Capital Final (R$)": "R$ {:.2f}"
-        })
-    )
+    # Forçar reexecução para mostrar os resultados
+    st.rerun()
+
+# === FILTROS PARA RESULTADOS DO BACKTEST ===
+if st.session_state.backtest_executado:
+    # Criar container para filtros
+    st.subheader("🔍 Filtrar Resultados do Backtest")
     
-    # Estatísticas gerais
-    st.subheader("📈 Estatísticas Consolidadas")
-    
-    col1, col2 = st.columns(2)
-    
+# Botão para resetar filtros
+    col_reset, _ = st.columns([1, 5])
+    with col_reset:
+        if st.button("🔄 Resetar Filtros"):
+            for key in list(st.session_state.keys()):
+                if key.startswith("Filtro_"):
+                    del st.session_state[key]
+            st.rerun()
+
+    # Criando quatro colunas para os filtros
+    col1, col2, col3, col4 = st.columns(4)
+
     with col1:
-        st.metric("Total de Ativos Analisados", len(df_melhores))
-        st.metric("Média de Lucro", f"R$ {df_melhores['Lucro Total (R$)'].mean():.2f}")
-        st.metric("Média de Trades", f"{df_melhores['Trades'].mean():.1f}")
-    
-    with col2:
-        st.metric("Média de % Lucrativos", f"{df_melhores['% Trades Lucrativos'].mean():.2f}%")
-        st.metric("Média do Fator Lucro", f"{df_melhores['Fator Lucro'].mean():.2f}")
-        st.metric("Maior Retorno", f"{df_melhores['Resultado (%)'].max():.2f}%")
-    
-    # Gráfico de barras dos lucros por ativo
-    st.subheader("💰 Lucro Total por Ativo")
-    
-    fig = go.Figure()
-    df_sorted = df_melhores.sort_values(by="Lucro Total (R$)", ascending=False).head(30)
-    
-    # Cores baseadas no lucro (positivo=verde, negativo=vermelho)
-    cores = ["mediumseagreen" if val >= 0 else "indianred" for val in df_sorted["Lucro Total (R$)"]]
-    
-    fig.add_trace(go.Bar(
-        x=df_sorted["Ativo"],
-        y=df_sorted["Lucro Total (R$)"],
-        marker_color=cores,
-        text=[f"R$ {v:,.2f}" for v in df_sorted["Lucro Total (R$)"]],
-        textposition="auto"
-    ))
-    
-    fig.update_layout(
-        title="Lucro Total por Ativo",
-        xaxis_title="Ativo",
-        yaxis_title="Lucro Total (R$)",
-        height=500
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Opção para visualizar detalhes de cada ativo
-    st.subheader("🔍 Detalhes por Ativo")
-    
-    ativo_selecionado_detalhes = st.selectbox(
-        "Selecione um ativo para ver os detalhes", 
-        options=df_melhores["Ativo"].tolist()
-    )
-    
-    # Encontrar o resultado detalhado do ativo selecionado
-    resultado_detalhado = next((res for res in melhores_resultados if res["Ativo"] == ativo_selecionado_detalhes), None)
-        
-    if resultado_detalhado is not None:
-        df_trades_detalhado = resultado_detalhado["df_trades"]
-        # Verificar se o DataFrame tem registros
-        if isinstance(df_trades_detalhado, pd.DataFrame) and len(df_trades_detalhado) > 0:
-            st.markdown(f"### Trades do ativo {ativo_selecionado_detalhes} - IFR {resultado_detalhado['IFR']}")
-            
-            # DataFrame com os trades
-            st.dataframe(
-                df_trades_detalhado.style.format({
-                    "Preço Entrada": "R$ {:.2f}",
-                    "Preço Saída": "R$ {:.2f}",
-                    "Lucro": "R$ {:.2f}",
-                    "Retorno R$": "R$ {:.2f}",
-                    "Capital Acumulado": "R$ {:.2f}",
-                    "IFR Entrada": "{:.0f}",
-                    "Data Entrada": lambda x: x.strftime("%d-%m-%Y") if pd.notnull(x) else "",
-                    "Data Saída": lambda x: x.strftime("%d-%m-%Y") if pd.notnull(x) else ""
-                })
-            )
-            
-            # Curva de Capital
-            st.subheader("📈 Curva de Capital")
-            fig_cap = go.Figure()
-            fig_cap.add_trace(go.Scatter(
-                x=df_trades_detalhado["Data Saída"],
-                y=df_trades_detalhado["Capital Acumulado"],
-                mode="lines+markers",
-                name="Capital"
-            ))
-            st.plotly_chart(fig_cap, use_container_width=True)
-            
-            # Retorno Mensal
-            st.subheader("📆 Retorno Mensal (Não Acumulado)")
-            
-            df_trades_detalhado["Data Saída"] = pd.to_datetime(df_trades_detalhado["Data Saída"])
-            df_trades_detalhado["AnoMes"] = df_trades_detalhado["Data Saída"].dt.to_period("M").astype(str)
-            
-            retorno_mensal = df_trades_detalhado.groupby("AnoMes")["Retorno R$"].sum().reset_index()
-            retorno_mensal["Retorno R$"] = pd.to_numeric(retorno_mensal["Retorno R$"], errors="coerce")
-            
-            cores_mensal = ["mediumseagreen" if val >= 0 else "indianred" for val in retorno_mensal["Retorno R$"]]
-            
-            fig_bar = go.Figure(data=[
-                go.Bar(
-                    x=retorno_mensal["AnoMes"],
-                    y=retorno_mensal["Retorno R$"],
-                    marker_color=cores_mensal,
-                    text=[f"R$ {v:,.2f}" for v in retorno_mensal["Retorno R$"]],
-                    textposition="outside",
-                )
-            ])
-            
-            fig_bar.update_layout(
-                xaxis_title="Mês",
-                yaxis_title="Retorno (R$)",
-                yaxis=dict(zeroline=True),
-                showlegend=False,
-                bargap=0.2,
-                height=400
-            )
-            
-            st.plotly_chart(fig_bar, use_container_width=True)
-        else:
-            st.info("Não há operações registradas para este ativo com os parâmetros selecionados.")
-    else:
-        st.info("Não foi possível encontrar detalhes para este ativo.")
-    
-    # Oferecer opção para download do Excel
-    st.subheader("📥 Exportar Resultados")
-
-    # Copiar o DataFrame sem as informações detalhadas que não precisam ir para o Excel
-    df_export = df_melhores.copy()
-    df_export["Lista_Azul"] = df_export["Ativo"].astype(str) + ";" + df_export["IFR"].astype(str)
-
-    # Gerar link para download do arquivo compacto
-    st.markdown("#### 📄 Arquivo Compacto – Melhores IFRs por Ativo")
-    st.caption("Contém apenas o resumo dos melhores IFRs por ativo.")
-    st.markdown(
-        get_excel_download_link(df_export, f"backtest_ifr_{lista_selecionada}.xlsx"), 
-        unsafe_allow_html=True
-    )
-    st.markdown("---")
-    # Exportar todos os trades detalhados
-    all_trades = []
-    for res in melhores_resultados:
-        if isinstance(res["df_trades"], pd.DataFrame) and len(res["df_trades"]) > 0:
-            df_trades = res["df_trades"].copy()
-            df_trades["Melhor IFR"] = res["IFR"]
-            df_trades["Lista_Azul"] = df_trades["Ativo"].astype(str) + ";" + df_trades["Melhor IFR"].astype(str)
-            all_trades.append(df_trades)
-
-    if all_trades:
-        df_all_trades = pd.concat(all_trades)
-        
-        st.markdown("#### 📄 Arquivo Completo – Todas as Operações Detalhadas")
-        st.caption("Contém todas as operações (trades) feitas com o melhor IFR de cada ativo.")
-        st.markdown(
-            get_excel_download_link(df_all_trades, f"backtest_ifr_{lista_selecionada}_trades_detalhados.xlsx"), 
-            unsafe_allow_html=True
+        min_perc_lucrativos = st.slider(
+            "% Trades Lucrativos (Mínimo)", 
+            min_value=0, 
+            max_value=100,
+            value=st.session_state.get("Filtro_min_perc_lucrativos", 75),
+            step=1,
+            key="Filtro_min_perc_lucrativos"
         )
 
+    with col2:
+        max_drawdown = st.slider(
+            "Drawdown Máximo (%)", 
+            min_value=0, 
+            max_value=30,
+            value=st.session_state.get("Filtro_max_drawdown", 5),
+            step=1,
+            key="Filtro_max_drawdown"
+        )
+
+    with col3:
+        min_resultado = st.slider(
+            "Resultado Mínimo (%)", 
+            min_value=00, 
+            max_value=1000,
+            value=st.session_state.get("Filtro_min_resultado", 5),
+            step=10,
+            key="Filtro_min_resultado"
+        )
+
+    with col4:
+        min_trades = st.slider(
+            "Número Mínimo de Trades", 
+            min_value=0, 
+            max_value=200,
+            value=st.session_state.get("Filtro_min_trades", 0),
+            step=1,
+            key="Filtro_min_trades"
+        )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        min_fator_lucro = st.slider(
+            "Fator de Lucro Mínimo", 
+            min_value=0.0, 
+            max_value=100.0,
+            value=st.session_state.get("Filtro_min_fator_lucro", 0.0),
+            step=1.0,
+            key="Filtro_min_fator_lucro"
+        )
+
+    with col2:
+        opcoes_ordenacao = [
+            "Resultado (%) ↓", 
+            "Lucro Total (R$) ↓", 
+            "% Trades Lucrativos ↓", 
+            "Drawdown (%) ↑", 
+            "Fator Lucro ↓",
+            "Trades ↓"
+        ]
+
+        ordenacao_escolhida = st.selectbox(
+            "Ordenar resultados por:", 
+            opcoes_ordenacao,
+            index=0,
+            key="Filtro_ordenacao_escolhida"
+        )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+    
+    # Mapear opção de ordenação para coluna e direção
+    mapeamento_ordenacao = {
+        "Resultado (%) ↓": ("Resultado (%)", False),
+        "Lucro Total (R$) ↓": ("Lucro Total (R$)", False),
+        "% Trades Lucrativos ↓": ("% Trades Lucrativos", False),
+        "Drawdown (%) ↑": ("Drawdown (%)", True),  # Ascending (menor é melhor)
+        "Fator Lucro ↓": ("Fator Lucro", False),
+        "Trades ↓": ("Trades", False)
+    }
+    
+    # Aplicar filtros ao DataFrame
+    df_filtrado_resultados = st.session_state.df_melhores[
+        (st.session_state.df_melhores["% Trades Lucrativos"] >= min_perc_lucrativos) &
+        (st.session_state.df_melhores["Drawdown (%)"] <= max_drawdown) &
+        (st.session_state.df_melhores["Resultado (%)"] >= min_resultado) &
+        (st.session_state.df_melhores["Trades"] >= min_trades) &
+        (st.session_state.df_melhores["Fator Lucro"] >= min_fator_lucro)
+    ]
+    
+    # Ordenar DataFrame com base na seleção do usuário
+    col_ordenacao, ascendente = mapeamento_ordenacao[ordenacao_escolhida]
+    df_filtrado_resultados = df_filtrado_resultados.sort_values(by=col_ordenacao, ascending=ascendente)
+    
+    # Exibir resultados filtrados
+    st.subheader(f"📊 Resultados Filtrados - Lista: {lista_selecionada}")
+    
+    # Indicar o número de resultados
+    num_resultados = len(df_filtrado_resultados)
+    num_total = len(st.session_state.df_melhores)
+    st.markdown(f"**Exibindo {num_resultados} de {num_total} ativos que atendem aos critérios de filtro**")
+    
+    if df_filtrado_resultados.empty:
+        st.warning("Nenhum ativo atende aos critérios de filtro selecionados. Tente relaxar alguns filtros.")
+    else:
+        # Formatação para exibição
+        st.dataframe(
+            df_filtrado_resultados.style.format({
+                "Lucro Total (R$)": "R$ {:.2f}",
+                "% Trades Lucrativos": "{:.2f}%",
+                "Resultado (%)": "{:.2f}%",
+                "Drawdown (%)": "{:.2f}%",
+                "Fator Lucro": "{:.2f}",
+                "Ganho Médio (R$)": "R$ {:.2f}",
+                "Perda Média (R$)": "R$ {:.2f}",
+                "Capital Final (R$)": "R$ {:.2f}"
+            })
+        )
+    
+        # Estatísticas gerais dos resultados filtrados
+        st.subheader("📈 Estatísticas dos Resultados Filtrados")
         
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.metric("Total de Ativos Após Filtro", len(df_filtrado_resultados))
+            st.metric("Média de Lucro", f"R$ {df_filtrado_resultados['Lucro Total (R$)'].mean():.2f}")
+            st.metric("Média de Trades", f"{df_filtrado_resultados['Trades'].mean():.1f}")
+        
+        with col2:
+            st.metric("Média de % Lucrativos", f"{df_filtrado_resultados['% Trades Lucrativos'].mean():.2f}%")
+            st.metric("Média do Fator Lucro", f"{df_filtrado_resultados['Fator Lucro'].mean():.2f}")
+            st.metric("Maior Retorno", f"{df_filtrado_resultados['Resultado (%)'].max():.2f}%")
+        
+        # Gráfico de barras dos lucros por ativo
+        st.subheader("💰 Lucro Total por Ativo (Resultados Filtrados)")
+        
+        fig = go.Figure()
+        df_plot = df_filtrado_resultados.sort_values(by="Lucro Total (R$)", ascending=False).head(30)
+        
+        # Cores baseadas no lucro (positivo=verde, negativo=vermelho)
+        cores = ["mediumseagreen" if val >= 0 else "indianred" for val in df_plot["Lucro Total (R$)"]]
+        
+        fig.add_trace(go.Bar(
+            x=df_plot["Ativo"],
+            y=df_plot["Lucro Total (R$)"],
+            marker_color=cores,
+            text=[f"R$ {v:,.2f}" for v in df_plot["Lucro Total (R$)"]],
+            textposition="auto"
+        ))
+        
+        fig.update_layout(
+            title="Lucro Total por Ativo (Resultados Filtrados)",
+            xaxis_title="Ativo",
+            yaxis_title="Lucro Total (R$)",
+            height=500
+        )
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # Opção para visualizar detalhes de cada ativo
+        st.subheader("🔍 Detalhes por Ativo")
+        
+        ativo_selecionado_detalhes = st.selectbox(
+            "Selecione um ativo para ver os detalhes", 
+            options=df_filtrado_resultados["Ativo"].tolist()
+        )
+        
+        # Encontrar o resultado detalhado do ativo selecionado
+        resultado_detalhado = next((res for res in st.session_state.melhores_resultados if res["Ativo"] == ativo_selecionado_detalhes), None)
+            
+        if resultado_detalhado is not None:
+            df_trades_detalhado = resultado_detalhado["df_trades"]
+            # Verificar se o DataFrame tem registros
+            if isinstance(df_trades_detalhado, pd.DataFrame) and len(df_trades_detalhado) > 0:
+                st.markdown(f"### Trades do ativo {ativo_selecionado_detalhes} - IFR {resultado_detalhado['IFR']}")
+                
+                # DataFrame com os trades
+                st.dataframe(
+                    df_trades_detalhado.style.format({
+                        "Preço Entrada": "R$ {:.2f}",
+                        "Preço Saída": "R$ {:.2f}",
+                        "Lucro": "R$ {:.2f}",
+                        "Retorno R$": "R$ {:.2f}",
+                        "Capital Acumulado": "R$ {:.2f}",
+                        "IFR Entrada": "{:.0f}",
+                        "Data Entrada": lambda x: x.strftime("%d-%m-%Y") if pd.notnull(x) else "",
+                        "Data Saída": lambda x: x.strftime("%d-%m-%Y") if pd.notnull(x) else ""
+                    })
+                )
+                
+                # Curva de Capital
+                st.subheader("📈 Curva de Capital")
+                fig_cap = go.Figure()
+                fig_cap.add_trace(go.Scatter(
+                    x=df_trades_detalhado["Data Saída"],
+                    y=df_trades_detalhado["Capital Acumulado"],
+                    mode="lines+markers",
+                    name="Capital"
+                ))
+                st.plotly_chart(fig_cap, use_container_width=True)
+                
+                # Retorno Mensal
+                st.subheader("📆 Retorno Mensal (Não Acumulado)")
+                
+                df_trades_detalhado["Data Saída"] = pd.to_datetime(df_trades_detalhado["Data Saída"])
+                df_trades_detalhado["AnoMes"] = df_trades_detalhado["Data Saída"].dt.to_period("M").astype(str)
+                
+                retorno_mensal = df_trades_detalhado.groupby("AnoMes")["Retorno R$"].sum().reset_index()
+                retorno_mensal["Retorno R$"] = pd.to_numeric(retorno_mensal["Retorno R$"], errors="coerce")
+                
+                cores_mensal = ["mediumseagreen" if val >= 0 else "indianred" for val in retorno_mensal["Retorno R$"]]
+                
+                fig_bar = go.Figure(data=[
+                    go.Bar(
+                        x=retorno_mensal["AnoMes"],
+                        y=retorno_mensal["Retorno R$"],
+                        marker_color=cores_mensal,
+                        text=[f"R$ {v:,.2f}" for v in retorno_mensal["Retorno R$"]],
+                        textposition="outside",
+                    )
+                ])
+                
+                fig_bar.update_layout(
+                    xaxis_title="Mês",
+                    yaxis_title="Retorno (R$)",
+                    yaxis=dict(zeroline=True),
+                    showlegend=False,
+                    bargap=0.2,
+                    height=400
+                )
+                
+                st.plotly_chart(fig_bar, use_container_width=True)
+            else:
+                st.info("Não há operações registradas para este ativo com os parâmetros selecionados.")
+        else:
+            st.info("Não foi possível encontrar detalhes para este ativo.")
+        
+        # Oferecer opção para download do Excel
+        st.subheader("📥 Exportar Resultados Filtrados")
+    
+        # Copiar o DataFrame sem as informações detalhadas que não precisam ir para o Excel
+        df_export = df_filtrado_resultados.copy()
+        df_export["Lista_Azul"] = df_export["Ativo"].astype(str) + ";" + df_export["IFR"].astype(str)
+
+        # Gerar link para download do arquivo compacto
+        st.markdown("#### 📄 Arquivo Compacto – Melhores IFRs por Ativo (Filtrados)")
+        st.caption("Contém apenas o resumo dos melhores IFRs por ativo que atendem aos critérios de filtro.")
+        st.markdown(
+            get_excel_download_link(df_export, f"backtest_ifr_{lista_selecionada}_filtrados.xlsx"), 
+            unsafe_allow_html=True
+        )
+        st.markdown("---")
+        
+        # Exportar todos os trades detalhados para ativos filtrados
+        ativos_filtrados = set(df_filtrado_resultados["Ativo"].tolist())
+        filtered_trades = []
+        for res in st.session_state.melhores_resultados:
+            if res["Ativo"] in ativos_filtrados and isinstance(res["df_trades"], pd.DataFrame) and len(res["df_trades"]) > 0:
+                df_trades = res["df_trades"].copy()
+                df_trades["Melhor IFR"] = res["IFR"]
+                df_trades["Lista_Azul"] = df_trades["Ativo"].astype(str) + ";" + df_trades["Melhor IFR"].astype(str)
+                filtered_trades.append(df_trades)
+
+        if filtered_trades:
+            df_filtered_trades = pd.concat(filtered_trades)
+            
+            st.markdown("#### 📄 Arquivo Completo – Operações Detalhadas (Ativos Filtrados)")
+            st.caption("Contém todas as operações (trades) feitas com o melhor IFR dos ativos filtrados.")
+            st.markdown(
+                get_excel_download_link(df_filtered_trades, f"backtest_ifr_{lista_selecionada}_trades_detalhados_filtrados.xlsx"), 
+                unsafe_allow_html=True
+            )
+
+# Se não executou backtest ainda, mostrar mensagem informativa
 else:
-    st.info("Selecione os parâmetros desejados e clique em 'Executar Backtest Múltiplo' para iniciar a análise.")
+    st.info("Selecione os parâmetros desejados e clique em 'Executar Backtest Múltiplo' para iniciar a análise. Depois você poderá filtrar os resultados.")
