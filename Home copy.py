@@ -4,7 +4,7 @@ import os
 
 st.set_page_config(page_title="Home", layout="wide")
 
-# Caminho para imagens
+# Caminho para imagem
 CAMINHO_IMAGENS = "02-imagens"
 imagem_path = os.path.join(CAMINHO_IMAGENS, "rendvar_banner.jpg")
 
@@ -12,20 +12,6 @@ imagem_path = os.path.join(CAMINHO_IMAGENS, "rendvar_banner.jpg")
 if os.path.exists(imagem_path):
     imagem = Image.open(imagem_path)
     st.image(imagem, use_container_width=True)
-
-# Adiciona logomarca no menu lateral
-with st.sidebar:
-    # Logo no topo (substitua 'logo.png' pelo caminho da sua imagem)
-    logo_path = os.path.join(CAMINHO_IMAGENS, "logo.png")
-    if os.path.exists(logo_path):
-        logo = Image.open(logo_path)
-        st.image(logo, use_container_width=True)
-    
-    # Espaço para o conteúdo do menu (será adicionado automaticamente pelo Streamlit)
-    
-    # Rodapé
-    st.markdown("---")  # Linha separadora
-    st.markdown("### Desenvolvido por Vladimir")
 
 st.title("📊 Sistema RendVar")
 st.write("""
