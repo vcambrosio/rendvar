@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import time
 
 # Título do aplicativo
-st.title("Processador de Arquivos CSV e Atualização de Cotações")
+st.title("Gerar listas e coletar dados historicos")
 st.markdown("[🔗 Link para baixar lista do Índice de ações com governança corporativa diferenciada (IGC B3)](https://www.b3.com.br/pt_br/market-data-e-indices/indices/indices-de-governanca/indice-de-acoes-com-governanca-corporativa-diferenciada-igcx-composicao-da-carteira.htm)")
 st.markdown("[🔗 Link para baixar lista do Índice Brasil 100 (IBrX 100 B3)](https://www.b3.com.br/pt_br/market-data-e-indices/indices/indices-amplos/indice-brasil-100-ibrx-100-composicao-da-carteira.htm)")
 st.markdown("[🔗 Link para baixar lista do Índice Brasil Amplo BM&FBOVESPA (IBrA B3)](https://www.b3.com.br/pt_br/market-data-e-indices/indices/indices-amplos/indice-brasil-amplo-ibra-composicao-da-carteira.htm)")
@@ -151,7 +151,7 @@ def baixar_dados_historicos(tickers, nome_lista):
     
     # Configurar período de download
     data_fim = datetime.now()
-    data_inicio = data_fim - timedelta(days=5*365)  # 5 anos
+    data_inicio = data_fim - timedelta(days=10*365)  # 10 anos
     
     # Criar DataFrame vazio para armazenar todos os dados
     all_data = pd.DataFrame()
