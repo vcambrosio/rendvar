@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 from datetime import date
+from PIL import Image
 
 # Configuração da página
 st.set_page_config(page_title="Tickers Mais Líquidos", layout="wide")
@@ -91,7 +92,29 @@ df_filtrados_volume = df_ordenado[df_ordenado['Media_Movel_Volume'] >= volume_mi
 df_top_liquidos = df_filtrados_volume[['Ticker', 'Media_Movel_Volume']].head(quantidade_tickers)
 
 
-
+with st.sidebar:
+    # Cria duas colunas (ajuste a proporção conforme necessário)
+    st.markdown("---")  # Linha separadora abaixo
+    col_logo, col_texto = st.columns([1, 3])
+    
+    with col_logo:
+        # Logo redimensionada para 50px de largura
+        logo_path = os.path.join("02-imagens", "logo.png")
+        if os.path.exists(logo_path):
+            logo = Image.open(logo_path)
+            base_width = 50
+            w_percent = (base_width / float(logo.size[0]))
+            h_size = int((float(logo.size[1]) * float(w_percent)))
+            logo = logo.resize((base_width, h_size), Image.Resampling.LANCZOS)
+            st.image(logo, use_container_width=False)
+    
+    with col_texto:
+        # Texto alinhado verticalmente ao centro
+        st.markdown("""
+        <div style='display: flex; align-items: center; height: 100%;'>
+            <p style='margin: 0;'>Desenvolvido por Vladimir</p>
+        </div>
+        """, unsafe_allow_html=True)
 
 
 # Formatar o volume para melhor visualização

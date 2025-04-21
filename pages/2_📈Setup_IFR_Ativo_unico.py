@@ -4,6 +4,7 @@ import numpy as np
 import os
 import plotly.graph_objects as go
 from datetime import timedelta
+from PIL import Image
 
 # Caminho dos dados
 parquet_path = "01-dados/ativos_historicos.parquet"
@@ -70,6 +71,41 @@ if usar_stop:
     stop_pct = st.sidebar.number_input("Stop Loss (% abaixo do preço de entrada)", min_value=0.1, max_value=50.0, value=5.0)
 else:
     stop_pct = None
+
+
+with st.sidebar:
+    # Cria duas colunas (ajuste a proporção conforme necessário)
+    st.markdown("---")  # Linha separadora abaixo
+    col_logo, col_texto = st.columns([1, 3])
+    
+    with col_logo:
+        # Logo redimensionada para 50px de largura
+        logo_path = os.path.join("02-imagens", "logo.png")
+        if os.path.exists(logo_path):
+            logo = Image.open(logo_path)
+            base_width = 50
+            w_percent = (base_width / float(logo.size[0]))
+            h_size = int((float(logo.size[1]) * float(w_percent)))
+            logo = logo.resize((base_width, h_size), Image.Resampling.LANCZOS)
+            st.image(logo, use_container_width=False)
+    
+    with col_texto:
+        # Texto alinhado verticalmente ao centro
+        st.markdown("""
+        <div style='display: flex; align-items: center; height: 100%;'>
+            <p style='margin: 0;'>Desenvolvido por Vladimir</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    
+
+
+
+
+
+
+
+
 
 # === BACKTEST ===
 if st.button("▶️ Executar Backtest"):
