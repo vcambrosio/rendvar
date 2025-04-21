@@ -436,7 +436,7 @@ if st.session_state.backtest_executado:
             "Resultado Mínimo (%)", 
             min_value=00, 
             max_value=100,
-            value=st.session_state.get("Filtro_min_resultado", 15),
+            value=st.session_state.get("Filtro_min_resultado", 36),
             step=1,
             key="Filtro_min_resultado"
         )
