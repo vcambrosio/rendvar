@@ -54,7 +54,7 @@ else:
 st.sidebar.header("📥 Critérios de Entrada Adicionais")
 usar_media = st.sidebar.checkbox("Usar Média Móvel como filtro adicional?")
 if usar_media:
-    media_periodos = st.sidebar.number_input("Períodos da Média Móvel", min_value=1, max_value=200, value=20)
+    media_periodos = st.sidebar.number_input("Períodos da Média Móvel", min_value=1, max_value=200, value=200)
 
 st.sidebar.header("📤 Critérios de Saída")
 max_candles_saida = st.sidebar.slider("Máxima dos últimos X candles", min_value=1, max_value=10, value=2)
@@ -71,7 +71,6 @@ if usar_stop:
 else:
     stop_pct = None
 
-# === BACKTEST ===
 # === BACKTEST ===
 if st.button("▶️ Executar Backtest"):
     resultados = []

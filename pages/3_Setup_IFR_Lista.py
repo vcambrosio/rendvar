@@ -28,18 +28,11 @@ st.sidebar.header("📋 Filtros")
 
 # Seleção de lista
 listas_disponiveis = sorted(df_base["Lista"].unique().tolist())
-selecionar_todas_listas = st.sidebar.checkbox("Selecionar todas as listas", value=False)
+lista_selecionada = st.sidebar.selectbox("Selecione a lista", listas_disponiveis)
 
-if selecionar_todas_listas:
-    lista_selecionada = "TODAS AS LISTAS"
-    # Não filtramos por lista, usamos todos os ativos
-    df_filtrado = df_base.copy()
-    ativos_disponiveis = sorted(df_filtrado["Ticker"].unique().tolist())
-else:
-    lista_selecionada = st.sidebar.selectbox("Selecione a lista", listas_disponiveis)
-    # Filtrar ativos pela lista selecionada
-    df_filtrado = df_base[df_base["Lista"] == lista_selecionada]
-    ativos_disponiveis = sorted(df_filtrado["Ticker"].unique().tolist())
+# Filtrar ativos pela lista selecionada
+df_filtrado = df_base[df_base["Lista"] == lista_selecionada]
+ativos_disponiveis = sorted(df_filtrado["Ticker"].unique().tolist())
 
 # Opção para selecionar todos os ativos
 selecionar_todos = st.sidebar.checkbox("Selecionar todos os ativos da lista", value=True)
@@ -47,28 +40,18 @@ selecionar_todos = st.sidebar.checkbox("Selecionar todos os ativos da lista", va
 if selecionar_todos:
     ativos_escolhidos = ativos_disponiveis
 else:
-    # Se houver muitos ativos, limitamos a exibição padrão aos primeiros 5
-    default_ativos = ativos_disponiveis[:5] if len(ativos_disponiveis) > 5 else ativos_disponiveis
-    ativos_escolhidos = st.sidebar.multiselect("Escolha os ativos", ativos_disponiveis, default=default_ativos)
-
-
+    ativos_escolhidos = st.sidebar.multiselect("Escolha os ativos", ativos_disponiveis, default=ativos_disponiveis[:5])
 
 # Define datas padrão com base no banco
-# Verifica se há dados e se a data máxima não é NaT
-if not df_filtrado.empty and pd.notna(df_filtrado["Date"].max()):
-    data_final_padrao = pd.to_datetime(df_filtrado["Date"].max()).normalize()
-else:
-    # Define uma data padrão caso não encontre datas válidas no dataframe
-    data_final_padrao = pd.to_datetime('today').normalize()
-
-data_inicial_padrao = data_final_padrao - timedelta(days=730)
+data_final_padrao = pd.to_datetime(df_filtrado["Date"].max()).normalize()
+data_inicial_padrao = data_final_padrao - timedelta(days=1095)
 
 st.sidebar.header("📅 Período do Backtest")
 data_inicial = st.sidebar.date_input("Data inicial", value=data_inicial_padrao)
 data_final = st.sidebar.date_input("Data final", value=data_final_padrao)
 
 st.sidebar.header("💰 Capital Inicial")
-capital_inicial = st.sidebar.number_input("Capital disponível (R$)", value=10000.0, step=100.0)
+capital_inicial = st.sidebar.number_input("Capital disponível (R$)", value=100000.0, step=10000.0)
 
 st.sidebar.header("📈 Parâmetros IFR")
 periodo_ifr = st.sidebar.number_input("Período do IFR", min_value=2, max_value=30, value=2)
@@ -79,7 +62,7 @@ intervalo_ifr = list(range(ifr_min, ifr_max + 1))
 st.sidebar.header("📥 Critérios de Entrada Adicionais")
 usar_media = st.sidebar.checkbox("Usar Média Móvel como filtro adicional?", value=True)
 if usar_media:
-    media_periodos = st.sidebar.number_input("Períodos da Média Móvel", min_value=1, max_value=200, value=20)
+    media_periodos = st.sidebar.number_input("Períodos da Média Móvel", min_value=1, max_value=200, value=200)
 
 st.sidebar.header("📤 Critérios de Saída")
 max_candles_saida = st.sidebar.slider("Máxima dos últimos X candles", min_value=1, max_value=10, value=2)
@@ -415,9 +398,9 @@ if st.session_state.backtest_executado:
         min_resultado = st.slider(
             "Resultado Mínimo (%)", 
             min_value=00, 
-            max_value=1000,
-            value=st.session_state.get("Filtro_min_resultado", 5),
-            step=10,
+            max_value=100,
+            value=st.session_state.get("Filtro_min_resultado", 15),
+            step=1,
             key="Filtro_min_resultado"
         )
 
@@ -426,9 +409,10 @@ if st.session_state.backtest_executado:
             "Número Mínimo de Trades", 
             min_value=0, 
             max_value=200,
-            value=st.session_state.get("Filtro_min_trades", 0),
+            value=st.session_state.get("Filtro_min_trades", 45),
             step=1,
             key="Filtro_min_trades"
+
         )
 
     col1, col2 = st.columns(2)
@@ -438,8 +422,8 @@ if st.session_state.backtest_executado:
             "Fator de Lucro Mínimo", 
             min_value=0.0, 
             max_value=100.0,
-            value=st.session_state.get("Filtro_min_fator_lucro", 0.0),
-            step=1.0,
+            value=st.session_state.get("Filtro_min_fator_lucro", 0.5),
+            step=0.5,
             key="Filtro_min_fator_lucro"
         )
 
