@@ -426,7 +426,7 @@ if st.session_state.backtest_executado:
             "Drawdown Máximo (%)", 
             min_value=0, 
             max_value=30,
-            value=st.session_state.get("Filtro_max_drawdown", 5),
+            value=st.session_state.get("Filtro_max_drawdown", 6),
             step=1,
             key="Filtro_max_drawdown"
         )
@@ -445,8 +445,8 @@ if st.session_state.backtest_executado:
         min_trades = st.slider(
             "Número Mínimo de Trades", 
             min_value=0, 
-            max_value=200,
-            value=st.session_state.get("Filtro_min_trades", 45),
+            max_value=60,
+            value=st.session_state.get("Filtro_min_trades", 18),
             step=1,
             key="Filtro_min_trades"
 
@@ -459,7 +459,7 @@ if st.session_state.backtest_executado:
             "Fator de Lucro Mínimo", 
             min_value=0.0, 
             max_value=100.0,
-            value=st.session_state.get("Filtro_min_fator_lucro", 0.5),
+            value=st.session_state.get("Filtro_min_fator_lucro", 2.5),
             step=0.5,
             key="Filtro_min_fator_lucro"
         )
