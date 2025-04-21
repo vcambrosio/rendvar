@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+from datetime import date
 
 # Configuração da página
 st.set_page_config(page_title="Tickers Mais Líquidos", layout="wide")
@@ -41,6 +42,20 @@ quantidade_tickers = st.sidebar.number_input(
     value=50
 )
 
+
+# Volume médio mínimo (entrada em milhões de R$)
+volume_minimo_milhoes = st.sidebar.number_input(
+    "Volume médio mínimo (R$ milhões)", 
+    min_value=0.0,
+    value=10.0,
+    step=10.0,
+    format="%.2f"
+)
+
+# Converter para reais
+volume_minimo = volume_minimo_milhoes * 1_000_000
+
+
 # Filtrar dados pela lista selecionada
 df_filtrado = df_base[df_base["Lista"] == lista_selecionada].copy()
 
@@ -69,8 +84,15 @@ df_ultimos = df_com_media.sort_values('Date').groupby('Ticker').last().reset_ind
 # Ordenar por média móvel de volume (do maior para o menor)
 df_ordenado = df_ultimos.sort_values('Media_Movel_Volume', ascending=False)
 
-# Selecionar os top N tickers
-df_top_liquidos = df_ordenado[['Ticker', 'Media_Movel_Volume']].head(quantidade_tickers)
+# Aplicar filtro de volume mínimo
+df_filtrados_volume = df_ordenado[df_ordenado['Media_Movel_Volume'] >= volume_minimo]
+
+# Selecionar os top N tickers após o filtro
+df_top_liquidos = df_filtrados_volume[['Ticker', 'Media_Movel_Volume']].head(quantidade_tickers)
+
+
+
+
 
 # Formatar o volume para melhor visualização
 def formatar_volume(volume):
@@ -119,10 +141,23 @@ st.download_button(
     mime="text/csv"
 )
 
-# Gráfico de barras dos volumes
-st.subheader(f"📈 Média Móvel de {dias_media_movel} dias do Volume")
-st.bar_chart(
-    df_top_liquidos.set_index("Ticker")["Media_Movel_Volume"],
-    height=500,
-    use_container_width=True
-)
+
+# Botão para salvar CSV com nome padronizado (somente os tickers, sem cabeçalho)
+if st.button("💾 Gerar lista para base de dados"):
+    # Garante que a pasta existe
+    pasta_listas = "01-dados/listas_csv"
+    os.makedirs(pasta_listas, exist_ok=True)
+
+    # Nome do arquivo com data
+    data_hoje = date.today().strftime("%Y-%m-%d")
+    nome_arquivo = f"{lista_selecionada}-Mais_liq-{data_hoje}.csv"
+    caminho_completo = os.path.join(pasta_listas, nome_arquivo)
+
+    # Salva apenas os tickers, sem cabeçalho
+    df_top_liquidos["Ticker"].to_csv(
+        caminho_completo,
+        index=False,
+        header=False,
+        encoding="utf-8"
+    )
+    st.success(f"📄 Lista salva com sucesso em: {caminho_completo}")
