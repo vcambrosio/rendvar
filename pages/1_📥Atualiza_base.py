@@ -333,6 +333,41 @@ def atualizar_todas_listas(diretorio):
     
     return True, f"Processo de atualização concluído:\n" + "\n".join(resultados)
 
+
+
+
+def remover_dados_historicos_por_lista(nome_lista):
+    caminho_bd = os.path.join("01-dados", "ativos_historicos.parquet")
+    
+    if not os.path.exists(caminho_bd):
+        return True  # Não há dados para remover
+    
+    try:
+        # Carregar o banco de dados existente
+        df = pd.read_parquet(caminho_bd)
+        
+        # Verificar se a coluna 'Lista' existe
+        if 'Lista' not in df.columns:
+            return True  # Não há dados associados a listas
+        
+        # Filtrar para manter apenas os dados que NÃO pertencem à lista que está sendo excluída
+        df_filtrado = df[df['Lista'] != nome_lista]
+        
+        # Salvar o DataFrame filtrado de volta ao arquivo parquet
+        df_filtrado.to_parquet(caminho_bd, index=False)
+        
+        return True
+    except Exception as e:
+        st.error(f"Erro ao remover dados históricos da lista '{nome_lista}': {str(e)}")
+        return False
+
+
+
+
+
+
+
+
 # Criar diretório se não existir
 diretorio = criar_diretorio()
 
@@ -370,10 +405,17 @@ if arquivos:
         with col1:
             st.write(arquivo)
         with col2:
-            if st.button("Excluir", key=f"del_{arquivo}"):
-                os.remove(os.path.join(diretorio, arquivo))
-                st.success(f"Arquivo '{arquivo}' excluído com sucesso!")
-                st.rerun()
+            with col2:
+                if st.button("Excluir", key=f"del_{arquivo}"):
+                    nome_lista = extrair_nome_arquivo(arquivo)
+                    # Primeiro remove o arquivo da lista
+                    os.remove(os.path.join(diretorio, arquivo))
+                    # Depois remove os dados históricos correspondentes
+                    if remover_dados_historicos_por_lista(nome_lista):
+                        st.success(f"Arquivo '{arquivo}' e seus dados históricos foram excluídos com sucesso!")
+                    else:
+                        st.error(f"Arquivo '{arquivo}' foi excluído, mas houve um problema ao remover os dados históricos.")
+                    st.rerun()
         with col3:
             if st.button("Atualizar", key=f"upd_{arquivo}"):
                 with st.spinner(f"Atualizando lista '{arquivo}'..."):
@@ -385,12 +427,36 @@ if arquivos:
     
     # Linha com botões para ações em massa
     col1, col2 = st.columns(2)
+    
     with col1:
         if st.button("Excluir Todos os Arquivos"):
+            # Primeiro remove todos os arquivos de lista
             for arquivo in arquivos:
                 os.remove(os.path.join(diretorio, arquivo))
-            st.success("Todos os arquivos foram excluídos!")
+            
+            # Depois remove o arquivo parquet completo
+            caminho_bd = os.path.join("01-dados", "ativos_historicos.parquet")
+            if os.path.exists(caminho_bd):
+                try:
+                    os.remove(caminho_bd)
+                    st.success("Todos os arquivos e o banco de dados histórico foram excluídos!")
+                except Exception as e:
+                    st.error(f"Arquivos de lista foram excluídos, mas houve um problema ao remover o banco de dados histórico: {str(e)}")
+            else:
+                st.success("Todos os arquivos foram excluídos!")
             st.rerun()
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
     with col2:
         if st.button("Atualizar Todas as Listas"):
             with st.spinner("Atualizando todas as listas..."):
