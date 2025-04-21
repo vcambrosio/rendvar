@@ -211,7 +211,7 @@ def baixar_dados_historicos(tickers, nome_lista):
                 dados_processados['Date'] = dados['Date']
                 
                 # Adicionar colunas padrão se existirem, ou None se não existirem
-                for col in ['Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']:
+                for col in ['Open', 'High', 'Low', 'Close', 'Volume']:
                     if col in dados.columns:
                         dados_processados[col] = dados[col]
                     else:
@@ -256,7 +256,7 @@ def baixar_dados_historicos(tickers, nome_lista):
                 dados_existentes = dados_existentes[dados_existentes['Lista'] != nome_lista]
                 
                 # Garantir que todas as colunas necessárias existam
-                colunas_necessarias = ['Lista', 'Ticker', 'Date', 'Open', 'High', 'Low', 'Close', 'Adj Close', 'Volume']
+                colunas_necessarias = ['Lista', 'Ticker', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume']
                 for col in colunas_necessarias:
                     if col not in dados_existentes.columns:
                         dados_existentes[col] = None
