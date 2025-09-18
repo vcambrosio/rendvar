@@ -74,12 +74,10 @@ else:
 
 
 with st.sidebar:
-    # Cria duas colunas (ajuste a proporção conforme necessário)
     st.markdown("---")  # Linha separadora abaixo
     col_logo, col_texto = st.columns([1, 3])
     
     with col_logo:
-        # Logo redimensionada para 50px de largura
         logo_path = os.path.join("02-imagens", "logo.png")
         if os.path.exists(logo_path):
             logo = Image.open(logo_path)
@@ -90,21 +88,12 @@ with st.sidebar:
             st.image(logo, use_container_width=False)
     
     with col_texto:
-        # Texto alinhado verticalmente ao centro
         st.markdown("""
         <div style='display: flex; align-items: center; height: 100%;'>
             <p style='margin: 0;'>Desenvolvido por Vladimir</p>
         </div>
         """, unsafe_allow_html=True)
     
-    
-
-
-
-
-
-
-
 
 
 # === BACKTEST ===
@@ -112,30 +101,48 @@ if st.button("▶️ Executar Backtest"):
     resultados = []
 
     for ifr_entrada in intervalo_ifr:
-        df = df_filtrado[df_filtrado["Ticker"] == ativo_escolhido].copy()
-        df["Date"] = pd.to_datetime(df["Date"]).dt.tz_localize(None)
+        # Seleciona apenas o ativo escolhido
+        df_temp = df_filtrado[df_filtrado["Ticker"] == ativo_escolhido].copy()
+        df_temp = df_temp.sort_values("Date")
+        df_temp["Date"] = pd.to_datetime(df_temp["Date"]).dt.tz_localize(None)
 
-        buffer_dias = max(media_periodos if usar_media else periodo_ifr, 10)
-        data_inicial_expandida = pd.to_datetime(data_inicial) - timedelta(days=buffer_dias)
-        df = df[(df["Date"] >= data_inicial_expandida) & (df["Date"] <= pd.to_datetime(data_final))]
-        df.sort_values("Date", inplace=True)
+        # Determina quantos candles precisamos para calcular médias/IFR
+        periodos_necessarios = max(media_periodos if usar_media else 0, periodo_ifr)
+
+        # Encontra o índice da primeira data >= data_inicial
+        idx_inicial = df_temp[df_temp["Date"] >= pd.to_datetime(data_inicial)].index.min()
+
+        # Define a data inicial expandida retrocedendo candles suficientes
+        if pd.notna(idx_inicial) and idx_inicial - periodos_necessarios >= 0:
+            data_inicial_expandida = df_temp.loc[idx_inicial - periodos_necessarios, "Date"]
+        else:
+            data_inicial_expandida = pd.to_datetime(data_inicial)
+
+        # Filtra o DataFrame já com margem suficiente
+        df = df_temp[(df_temp["Date"] >= data_inicial_expandida) & (df_temp["Date"] <= pd.to_datetime(data_final))]
         df.set_index("Date", inplace=True)
 
+        # Calcula IFR
         delta = df["Close"].diff()
         gain = delta.where(delta > 0, 0)
         loss = -delta.where(delta < 0, 0)
 
-        avg_gain = gain.ewm(com=periodo_ifr - 1, min_periods=periodo_ifr).mean()
-        avg_loss = loss.ewm(com=periodo_ifr - 1, min_periods=periodo_ifr).mean()
+        # avg_gain = gain.ewm(com=periodo_ifr - 1, min_periods=periodo_ifr).mean()
+        #avg_loss = loss.ewm(com=periodo_ifr - 1, min_periods=periodo_ifr).mean()
+        avg_gain = gain.rolling(periodo_ifr).mean()
+        avg_loss = loss.rolling(periodo_ifr).mean()
+
         rs = avg_gain / avg_loss
         df["IFR"] = 100 - (100 / (1 + rs))
 
+        # Calcula a média móvel (se habilitado)
         if usar_media:
             df["Media"] = df["Close"].rolling(media_periodos).mean()
             df["compra"] = (df["IFR"] < ifr_entrada) & (df["Close"] > df["Media"])
         else:
             df["compra"] = df["IFR"] < ifr_entrada
 
+        # Remove candles anteriores à data inicial real
         df = df[df.index >= pd.to_datetime(data_inicial)]
         posicao = False
         preco_entrada = 0
@@ -203,7 +210,7 @@ if st.button("▶️ Executar Backtest"):
                         "Lucro": lucro,
                         "Motivo": motivo,
                         "Quantidade": quantidade,
-                        "Lista": lista_selecionada  # Adicionando a lista ao registro do trade
+                        "Lista": lista_selecionada
                     })
                     posicao = False
 
@@ -253,7 +260,6 @@ if st.button("▶️ Executar Backtest"):
         })
     )
 
-    # Quadro de estatísticas detalhadas
     st.markdown("### 📋 Estatísticas do Resultado")
     df_trades_melhor = melhor["df_trades"]
     total_ops = len(df_trades_melhor)
@@ -290,16 +296,11 @@ if st.button("▶️ Executar Backtest"):
     st.plotly_chart(fig, use_container_width=True)
 
     st.subheader("📆 Retorno Mensal (Não Acumulado)")
-
-    # Garantir tipo datetime e valores numéricos
     df_trades_melhor["Data Saída"] = pd.to_datetime(df_trades_melhor["Data Saída"])
     df_trades_melhor["AnoMes"] = df_trades_melhor["Data Saída"].dt.to_period("M").astype(str)
-
-    # Agrupar por mês
     retorno_mensal = df_trades_melhor.groupby("AnoMes")["Retorno R$"].sum().reset_index()
     retorno_mensal["Retorno R$"] = pd.to_numeric(retorno_mensal["Retorno R$"], errors="coerce")
 
-    # Gráfico com cores condicionais
     cores = ["mediumseagreen" if val >= 0 else "indianred" for val in retorno_mensal["Retorno R$"]]
 
     fig_bar = go.Figure(data=[
@@ -323,6 +324,5 @@ if st.button("▶️ Executar Backtest"):
 
     st.plotly_chart(fig_bar, use_container_width=True)
 
-    # Tabela opcional com os dados mensais
     with st.expander("🔍 Ver Tabela de Retornos Mensais"):
         st.dataframe(retorno_mensal.style.format({"Retorno R$": "R$ {:.2f}"}))
