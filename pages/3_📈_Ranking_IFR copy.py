@@ -77,7 +77,7 @@ capital_inicial = st.sidebar.number_input("Capital inicial (R$)", min_value=1000
 
 def gerar_arquivos_exportacao(df_resultados):
     """
-    Gera os arquivos ifr_dados.txt e lista_azul.set com os dados dos ativos
+    Gera os arquivos ifr_dados.txt, lista_azul.set e ranking_rsi.txt com os dados dos ativos
     e retorna os links de download
     """
     # Criar diretório de saída se não existir
@@ -103,11 +103,21 @@ def gerar_arquivos_exportacao(df_resultados):
         for _, row in df_resultados.iterrows():
             f.write(f"{row['Ativo']}\n")
     
+    # Gerar arquivo ranking_rsi.txt
+    ranking_rsi_path = os.path.join(output_dir, "ranking_rsi.txt")
+    with open(ranking_rsi_path, "w") as f:
+        for _, row in df_resultados.iterrows():
+            # Formato: ATIVO;IFR_2ANOS;LD_MEDIO
+            # Usar vírgula como separador decimal para o LD Médio
+            ld_formatado = f"{row['LD Médio']:.2f}".replace('.', ',')
+            f.write(f"{row['Ativo']};{int(row['IFR em 2 anos'])};{ld_formatado}\n")
+    
     # Criar links de download para os arquivos
     ifr_dados_link = criar_link_download(ifr_dados_path, "ifr_dados.txt")
     lista_azul_link = criar_link_download(lista_azul_path, lista_azul_filename)
+    ranking_rsi_link = criar_link_download(ranking_rsi_path, "ranking_rsi.txt")
     
-    return ifr_dados_path, lista_azul_path, ifr_dados_link, lista_azul_link
+    return ifr_dados_path, lista_azul_path, ranking_rsi_path, ifr_dados_link, lista_azul_link, ranking_rsi_link
 
 def criar_link_download(file_path, filename):
     """
@@ -467,16 +477,18 @@ if st.button("🚀 Calcular Ranking"):
         )
         
         # Gerar arquivos automaticamente após o cálculo
-        ifr_dados_path, lista_azul_path, ifr_dados_link, lista_azul_link = gerar_arquivos_exportacao(df_display)
+        ifr_dados_path, lista_azul_path, ranking_rsi_path, ifr_dados_link, lista_azul_link, ranking_rsi_link = gerar_arquivos_exportacao(df_display)
         
         # Exibir links de download
         st.subheader("📥 Arquivos de Exportação")
         st.markdown("Os arquivos foram gerados automaticamente e estão disponíveis para download:")
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.markdown(ifr_dados_link, unsafe_allow_html=True)
         with col2:
             st.markdown(lista_azul_link, unsafe_allow_html=True)
+        with col3:
+            st.markdown(ranking_rsi_link, unsafe_allow_html=True)
         
     # Exibir ativos excluídos do ranking
     if ativos_excluidos:
@@ -517,8 +529,13 @@ if st.button("🚀 Calcular Ranking"):
     **🎯 Lógica de entrada**: Compra quando IFR indica sobrevenda {f"mas o ativo está em tendência de alta (acima da média {media_periodos})" if usar_media else ""}
     
     **📈 Lógica de saída**: Vende quando o preço supera a máxima dos {max_candles_saida} candles anteriores (breakout){f", ou por stop loss" if usar_stop else ""}{f"/timeout" if usar_timeout else ""}
-    """)
+    
+    **📄 Arquivos gerados:**
+    - **ifr_dados.txt**: Lista de ativos com seus melhores valores de IFR
+    - **lista_azul.set**: Arquivo de configuração com timestamp e lista de ativos
+    - **ranking_rsi.txt**: Ranking com ativo, IFR de 2 anos e LD Médio (formato: ATIVO;IFR;LD)
     
     
 else:
-    st.info("Clique em 'Calcular Ranking' para gerar o ranking de Índice LD médio.")
+    st.info("Clique em 'Calcular Ranking' para gerar o ranking de índice LD médio.")
+    
