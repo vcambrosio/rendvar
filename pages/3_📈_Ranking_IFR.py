@@ -13,7 +13,7 @@ st.set_page_config(page_title="Ranking IFR - Índice LD", layout="wide")
 
 parquet_path = "01-dados/ativos_historicos.parquet"
 
-st.title("🏆 Ranking de Ativos pelo Índice LD Médio (Backtest Detalhado)")
+st.title("🏆 Ranking de Ativos Setup IFR pelo Índice LD Médio")
 
 if not os.path.exists(parquet_path):
     st.error("⚠ Base de dados não encontrada. Atualize a base antes de continuar.")
