@@ -52,13 +52,13 @@ media_periodos = st.sidebar.slider("Períodos da Média Móvel", min_value=20, m
 
 # Filtro de LD Médio
 st.sidebar.markdown("#### Filtro de Resultados")
-filtro_ld_ativo = st.sidebar.checkbox("Filtrar por LD Médio", value=False)
+filtro_ld_ativo = st.sidebar.checkbox("Filtrar por LD Médio", value=True)
 ld_minimo = st.sidebar.slider(
     "Valor mínimo de LD Médio:", 
     min_value=0.0,
     max_value=10.0,
-    value=1.0,
-    step=0.1,
+    value=5.0,
+    step=0.5,
     format="%.1f",
     disabled=not filtro_ld_ativo
 )
@@ -506,36 +506,62 @@ if st.button("🚀 Calcular Ranking"):
     href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="ranking_ld_corrigido.xlsx">📥 Baixar Ranking em Excel</a>'
     st.markdown(href, unsafe_allow_html=True)
     
-    st.info(f"""
-    **📋 Metodologia do LD Médio:**
+    # Criar informações da metodologia usando strings separadas para evitar problemas
+    st.markdown("**📋 Metodologia do LD Médio:**")
+    st.markdown("")
+    st.markdown("**Cálculos:**")
+    st.markdown("- **Trades Médio**: Média das razões (Número de trades de N anos ÷ N anos)")
+    st.markdown("- **Lucro Médio**: Média das razões (Lucro de N anos ÷ N anos)")
+    st.markdown("- **DD Médio**: Média das razões (Drawdown de N anos ÷ N anos)")
+    st.markdown("- **LD Médio**: Lucro Médio ÷ DD Médio")
+    st.markdown("")
+    st.markdown("**⚙️ Parâmetros do Setup:**")
+    st.markdown("- **Períodos analisados**: 10, 5, 3, 2 e 1 anos")
+    st.markdown(f"- **IFR utilizado**: Período de {periodo_ifr}, testando entradas de {ifr_min} a {ifr_max}")
     
-    **Cálculos:**
-    - **Trades Médio**: Média das razões (Número de trades de N anos ÷ N anos)
-    - **Lucro Médio**: Média das razões (Lucro de N anos ÷ N anos)
-    - **DD Médio**: Média das razões (Drawdown de N anos ÷ N anos)  
-    - **LD Médio**: Lucro Médio ÷ DD Médio
+    if usar_media:
+        st.markdown(f"- **Média móvel**: {media_periodos} períodos (filtro de tendência)")
+        st.markdown(f"- **Condição de entrada**: IFR < valor_testado E preço > média {media_periodos}")
+    else:
+        st.markdown("- **Média móvel**: Não utilizada")
+        st.markdown("- **Condição de entrada**: IFR < valor_testado")
     
-    **⚙️ Parâmetros do Setup:**
-    - **Períodos analisados**: 10, 5, 3, 2 e 1 anos
-    - **IFR utilizado**: Período de {periodo_ifr}, testando entradas de {ifr_min} a {ifr_max}
-    - **Média móvel**: {media_periodos if usar_media else "Não utilizada"} períodos {f"(filtro de tendência)" if usar_media else ""}
-    - **Condição de entrada**: IFR < valor_testado {f"E preço > média {media_periodos}" if usar_media else ""}
-    - **Saída**: Máxima de {max_candles_saida} candles anteriores
-    - **Stop Loss**: {f"{stop_pct}% (ativado)" if usar_stop else "Desativado"}
-    - **Timeout**: {f"{max_hold_days} dias (ativado)" if usar_timeout else "Desativado"}
-    - **Capital inicial**: R$ {capital_inicial:,}
-    - **Lote mínimo**: 100 ações
+    st.markdown(f"- **Saída**: Máxima de {max_candles_saida} candles anteriores")
     
-    **🎯 Lógica de entrada**: Compra quando IFR indica sobrevenda {f"mas o ativo está em tendência de alta (acima da média {media_periodos})" if usar_media else ""}
+    if usar_stop:
+        st.markdown(f"- **Stop Loss**: {stop_pct}% (ativado)")
+    else:
+        st.markdown("- **Stop Loss**: Desativado")
     
-    **📈 Lógica de saída**: Vende quando o preço supera a máxima dos {max_candles_saida} candles anteriores (breakout){f", ou por stop loss" if usar_stop else ""}{f"/timeout" if usar_timeout else ""}
+    if usar_timeout:
+        st.markdown(f"- **Timeout**: {max_hold_days} dias (ativado)")
+    else:
+        st.markdown("- **Timeout**: Desativado")
     
-    **📄 Arquivos gerados:**
-    - **ifr_dados.txt**: Lista de ativos com seus melhores valores de IFR
-    - **lista_azul.set**: Arquivo de configuração com timestamp e lista de ativos
-    - **ranking_rsi.txt**: Ranking com ativo, IFR de 2 anos e LD Médio (formato: ATIVO;IFR;LD)
+    st.markdown(f"- **Capital inicial**: R$ {capital_inicial:,}")
+    st.markdown("- **Lote mínimo**: 100 ações")
+    st.markdown("")
+    
+    if usar_media:
+        st.markdown(f"**🎯 Lógica de entrada**: Compra quando IFR indica sobrevenda mas o ativo está em tendência de alta (acima da média {media_periodos})")
+    else:
+        st.markdown("**🎯 Lógica de entrada**: Compra quando IFR indica sobrevenda")
+    
+    saida_texto = f"**📈 Lógica de saída**: Vende quando o preço supera a máxima dos {max_candles_saida} candles anteriores (breakout)"
+    if usar_stop and usar_timeout:
+        saida_texto += ", ou por stop loss/timeout"
+    elif usar_stop:
+        saida_texto += ", ou por stop loss"
+    elif usar_timeout:
+        saida_texto += ", ou por timeout"
+    
+    st.markdown(saida_texto)
+    st.markdown("")
+    st.markdown("**📄 Arquivos gerados:**")
+    st.markdown("- **ifr_dados.txt**: Lista de ativos com seus melhores valores de IFR")
+    st.markdown("- **lista_azul.set**: Arquivo de configuração com timestamp e lista de ativos")
+    st.markdown("- **ranking_rsi.txt**: Ranking com ativo, IFR de 2 anos e LD Médio (formato: ATIVO;IFR;LD)")
     
     
 else:
     st.info("Clique em 'Calcular Ranking' para gerar o ranking de índice LD médio.")
-    
