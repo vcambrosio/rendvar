@@ -163,234 +163,141 @@ def backtest_ativo_123(ativo, df_filtrado, data_inicial, data_final,
                        usar_timeout, max_hold_days, usar_trailing_stop, trailing_pct,
                        capital_inicial):
     
-    # Filtra os dados do ativo escolhido
     df = df_filtrado[df_filtrado["Ticker"] == ativo].copy()
     df["Date"] = pd.to_datetime(df["Date"]).dt.tz_localize(None)
-    
-    # Filtra por período
     df = df[(df["Date"] >= pd.to_datetime(data_inicial)) & (df["Date"] <= pd.to_datetime(data_final))]
     df.sort_values("Date", inplace=True)
     df.reset_index(drop=True, inplace=True)
     
-    # Verifica se há dados suficientes
     min_candles = 90 if eden_trades else 10
     if len(df) < min_candles:
         return {
-            "Ativo": ativo,
-            "Trades": 0,
-            "Lucro Total": 0,
-            "% Trades Lucrativos": 0,
-            "Capital Final": capital_inicial,
-            "df_trades": pd.DataFrame(),
-            "Lista": lista_selecionada,
-            "Resultado %": 0,
-            "Drawdown %": 0,
-            "Fator Lucro": 0,
-            "Ganho Médio": 0,
-            "Perda Média": 0,
-            "Padrões Encontrados": 0,
+            "Ativo": ativo, "Trades": 0, "Lucro Total": 0,
+            "% Trades Lucrativos": 0, "Capital Final": capital_inicial,
+            "df_trades": pd.DataFrame(), "Lista": lista_selecionada,
+            "Resultado %": 0, "Drawdown %": 0, "Fator Lucro": 0,
+            "Ganho Médio": 0, "Perda Média": 0, "Padrões Encontrados": 0,
             "Trades Filtrados Éden": 0
         }
     
-    # Calcula médias móveis exponenciais (sempre calcula para consistência)
+    # Médias móveis
     df[f'MME_{mme_curta}'] = df['Close'].ewm(span=mme_curta).mean()
     df[f'MME_{mme_longa}'] = df['Close'].ewm(span=mme_longa).mean()
     
-    # Identifica padrões 123 (FUNDO com 2º candle tendo menor mínima)
+    # Identificação do setup 123
     setup_123 = []
-    
     for i in range(2, len(df)):
-        candle_1 = df.iloc[i-2]  # primeiro candle
-        candle_2 = df.iloc[i-1]  # segundo candle (deve ter menor mínima)
-        candle_3 = df.iloc[i]    # terceiro candle
-        
-        # Verifica filtro de volume no terceiro candle
-        if usar_filtro_volume and candle_3["Volume"] < volume_minimo:
+        c1, c2, c3 = df.iloc[i-2], df.iloc[i-1], df.iloc[i]
+        if usar_filtro_volume and c3["Volume"] < volume_minimo:
             continue
-            
-        # Condições corretas do Setup 123 (FUNDO):
-        # O segundo candle deve ter a menor mínima dos três
-        condicao_fundo_123 = (candle_2["Low"] < candle_1["Low"] and 
-                              candle_2["Low"] < candle_3["Low"])
-        
-        if condicao_fundo_123:
-            # Define posição do stop baseado na escolha do usuário
-            if posicao_stop == "Mínima do penúltimo candle (padrão)":
-                stop_loss_setup = candle_2["Low"]  # mínima do segundo candle (penúltimo)
-            else:
-                stop_loss_setup = candle_3["Low"]  # mínima do terceiro candle (último)
-            
+        if c2["Low"] < c1["Low"] and c2["Low"] < c3["Low"]:
+            stop_loss_setup = c2["Low"] if posicao_stop == "Mínima do penúltimo candle (padrão)" else c3["Low"]
             setup_123.append({
                 'index': i,
-                'data': candle_3["Date"],
-                'entrada_target': candle_3["High"],  # máxima do terceiro candle
+                'data': c3["Date"],
+                'entrada_target': c3["High"],
                 'stop_loss': stop_loss_setup,
-                'candle_1_low': candle_1["Low"],
-                'candle_2_low': candle_2["Low"], 
-                'candle_3_low': candle_3["Low"],
-                'candle_3_high': candle_3["High"],
                 'padrao_tipo': 'Fundo 123'
             })
     
     padroes_encontrados = len(setup_123)
-    
     if not setup_123:
         return {
-            "Ativo": ativo,
-            "Trades": 0,
-            "Lucro Total": 0,
-            "% Trades Lucrativos": 0,
-            "Capital Final": capital_inicial,
-            "df_trades": pd.DataFrame(),
-            "Lista": lista_selecionada,
-            "Resultado %": 0,
-            "Drawdown %": 0,
-            "Fator Lucro": 0,
-            "Ganho Médio": 0,
-            "Perda Média": 0,
-            "Padrões Encontrados": 0,
-            "Trades Filtrados Éden": 0
+            "Ativo": ativo, "Trades": 0, "Lucro Total": 0,
+            "% Trades Lucrativos": 0, "Capital Final": capital_inicial,
+            "df_trades": pd.DataFrame(), "Lista": lista_selecionada,
+            "Resultado %": 0, "Drawdown %": 0, "Fator Lucro": 0,
+            "Ganho Médio": 0, "Perda Média": 0,
+            "Padrões Encontrados": 0, "Trades Filtrados Éden": 0
         }
     
-    # Executa as operações - APENAS UMA POSIÇÃO POR VEZ
     posicao_ativa = False
-    trades = []
-    trades_filtrados_eden = 0
+    trades, trades_filtrados_eden = [], 0
     
     for setup in setup_123:
-        # Só entra se não estiver posicionado
         if posicao_ativa:
             continue
-            
-        entrada_target = setup['entrada_target']
-        stop_loss = setup['stop_loss']
         
-        # Calcula o take profit (2x o risco)
-        risco = entrada_target - stop_loss
-        take_profit = entrada_target + (2 * risco)
+        entrada_target, stop_loss = setup['entrada_target'], setup['stop_loss']
         
-        # Procura pela entrada a partir do próximo candle
-        entrada_executada = False
-        for j in range(setup['index'] + 1, len(df)):
-            candle_atual = df.iloc[j]
+        # Entrada somente no próximo candle
+        if setup['index'] + 1 >= len(df):
+            continue
+        candle_atual = df.iloc[setup['index'] + 1]
+        
+        # Filtro de gap
+        if usar_filtro_gap:
+            candle_anterior = df.iloc[setup['index']]
+            gap_pct = abs(candle_atual["Open"] - candle_anterior["Close"]) / candle_anterior["Close"] * 100
+            if gap_pct > gap_maximo:
+                continue
+        
+        # Verifica se rompeu a máxima
+        if candle_atual["High"] >= entrada_target:
+            preco_entrada = candle_atual["Open"] if candle_atual["Open"] >= entrada_target else entrada_target
             
-            # Verifica gap excessivo na abertura
-            if usar_filtro_gap:
-                candle_anterior = df.iloc[j-1]
-                gap_pct = abs(candle_atual["Open"] - candle_anterior["Close"]) / candle_anterior["Close"] * 100
-                if gap_pct > gap_maximo:
+            # Filtro Éden
+            if eden_trades:
+                mme_curta_atual = candle_atual.get(f"MME_{mme_curta}", 0)
+                mme_longa_atual = candle_atual.get(f"MME_{mme_longa}", 0)
+                if preco_entrada <= mme_curta_atual or preco_entrada <= mme_longa_atual:
+                    trades_filtrados_eden += 1
                     continue
             
-            # Verifica se rompeu a máxima (entrada)
-            if candle_atual["High"] >= entrada_target:
-                # Determina preço de entrada
-                if candle_atual["Open"] >= entrada_target:
-                    preco_entrada = candle_atual["Open"]
+            quantidade = int((capital_inicial // preco_entrada) // 100) * 100
+            if quantidade == 0:
+                continue
+            
+            risco_real = preco_entrada - stop_loss
+            take_profit_real = preco_entrada + (2 * risco_real)
+            
+            posicao_ativa = True
+            data_entrada = candle_atual["Date"]
+            dias_hold, max_preco = 0, preco_entrada
+            
+            for k in range(setup['index'] + 1, len(df)):
+                candle_pos = df.iloc[k]
+                dias_hold += 1
+                
+                if usar_trailing_stop:
+                    max_preco = max(max_preco, candle_pos["High"])
+                    trailing_stop_price = max_preco * (1 - trailing_pct / 100)
+                    stop_atual = max(stop_loss, trailing_stop_price)
                 else:
-                    preco_entrada = entrada_target
+                    stop_atual = stop_loss
                 
-                # Aplica filtro Éden dos trades corretamente
-                if eden_trades:
-                    # Obtém as MMEs do candle atual
-                    if j < len(df):
-                        candle_para_mme = df.iloc[j]
-                        mme_curta_atual = candle_para_mme.get(f"MME_{mme_curta}", 0)
-                        mme_longa_atual = candle_para_mme.get(f"MME_{mme_longa}", 0)
-                        
-                        # Entrada deve ser ACIMA de ambas as MMEs
-                        if preco_entrada <= mme_curta_atual or preco_entrada <= mme_longa_atual:
-                            trades_filtrados_eden += 1
-                            continue
+                sair, preco_saida, motivo = False, None, ""
+                if candle_pos["Low"] <= stop_atual:
+                    sair, preco_saida, motivo = True, min(candle_pos["Open"], stop_atual), "Stop Loss"
+                elif candle_pos["High"] >= take_profit_real:
+                    sair, preco_saida, motivo = True, (candle_pos["Open"] if candle_pos["Open"] >= take_profit_real else take_profit_real), "Take Profit"
+                elif usar_timeout and max_hold_days and dias_hold >= max_hold_days:
+                    sair, preco_saida, motivo = True, candle_pos["Close"], "Timeout"
                 
-                # Calcula quantidade de ações
-                quantidade = int((capital_inicial // preco_entrada) // 100) * 100
-                if quantidade == 0:
-                    break
-                
-                # Recalcula stop e take com base no preço real de entrada
-                risco_real = preco_entrada - stop_loss
-                take_profit_real = preco_entrada + (2 * risco_real)
-                
-                posicao_ativa = True  # MARCA POSIÇÃO COMO ATIVA
-                data_entrada = candle_atual["Date"]
-                dias_hold = 0
-                max_preco = preco_entrada
-                entrada_executada = True
-                
-                # Acompanha a posição
-                for k in range(j, len(df)):
-                    candle_pos = df.iloc[k]
-                    dias_hold += 1
-                    
-                    # Atualiza máximo para trailing stop
-                    if usar_trailing_stop:
-                        max_preco = max(max_preco, candle_pos["High"])
-                        trailing_stop_price = max_preco * (1 - trailing_pct / 100)
-                        stop_atual = max(stop_loss, trailing_stop_price)
-                    else:
-                        stop_atual = stop_loss
-                    
-                    # Verifica saídas
-                    sair = False
-                    preco_saida = None
-                    motivo = ""
-                    
-                    # 1. Stop Loss
-                    if candle_pos["Low"] <= stop_atual:
-                        sair = True
-                        preco_saida = min(candle_pos["Open"], stop_atual)
-                        motivo = "Trailing Stop" if usar_trailing_stop and stop_atual > stop_loss else "Stop Loss"
-                    
-                    # 2. Take Profit
-                    elif candle_pos["High"] >= take_profit_real:
-                        sair = True
-                        if candle_pos["Open"] >= take_profit_real:
-                            preco_saida = candle_pos["Open"]
-                        else:
-                            preco_saida = take_profit_real
-                        motivo = "Take Profit"
-                    
-                    # 3. Timeout
-                    elif usar_timeout and max_hold_days and dias_hold >= max_hold_days:
-                        sair = True
-                        preco_saida = candle_pos["Close"]
-                        motivo = "Timeout"
-                    
-                    if sair:
-                        lucro = (preco_saida - preco_entrada) * quantidade
-                        retorno_pct = (preco_saida - preco_entrada) / preco_entrada * 100
-                        
-                        trade_data = {
-                            "Setup Data": setup['data'].strftime("%d/%m/%Y"),
-                            "Data Entrada": data_entrada.strftime("%d/%m/%Y"), 
-                            "Preço Entrada": preco_entrada,
-                            "Data Saída": candle_pos["Date"].strftime("%d/%m/%Y"),
-                            "Preço Saída": preco_saida,
-                            "Stop Loss": stop_loss,
-                            "Take Profit": take_profit_real,
-                            "Dias Hold": dias_hold,
-                            "Quantidade": quantidade,
-                            "Lucro": lucro,
-                            "Retorno %": retorno_pct,
-                            "Motivo": motivo,
-                            "Risco/Recompensa": f"1:2.0",
-                            "Lista": lista_selecionada,
-                            "Padrão": setup['padrao_tipo'],
-                            "Ativo": ativo
-                        }
-                        
-                        if eden_trades:
-                            trade_data[f"MME {mme_curta}"] = mme_curta_atual
-                            trade_data[f"MME {mme_longa}"] = mme_longa_atual
-                            trade_data["Éden Ativo"] = "Sim"
-                        else:
-                            trade_data["Éden Ativo"] = "Não"
-                        
-                        trades.append(trade_data)
-                        posicao_ativa = False  # LIBERA POSIÇÃO PARA PRÓXIMO SETUP
-                        break
-                
-                if entrada_executada:
+                if sair:
+                    lucro = (preco_saida - preco_entrada) * quantidade
+                    retorno_pct = (preco_saida - preco_entrada) / preco_entrada * 100
+                    trade_data = {
+                        "Setup Data": setup['data'].strftime("%d/%m/%Y"),
+                        "Data Entrada": data_entrada.strftime("%d/%m/%Y"), 
+                        "Preço Entrada": preco_entrada,
+                        "Data Saída": candle_pos["Date"].strftime("%d/%m/%Y"),
+                        "Preço Saída": preco_saida,
+                        "Stop Loss": stop_loss,
+                        "Take Profit": take_profit_real,
+                        "Dias Hold": dias_hold,
+                        "Quantidade": quantidade,
+                        "Lucro": lucro,
+                        "Retorno %": retorno_pct,
+                        "Motivo": motivo,
+                        "Risco/Recompensa": "1:2.0",
+                        "Lista": lista_selecionada,
+                        "Padrão": setup['padrao_tipo'],
+                        "Ativo": ativo,
+                        "Éden Ativo": "Sim" if eden_trades else "Não"
+                    }
+                    trades.append(trade_data)
+                    posicao_ativa = False
                     break
     
     # Análise dos resultados

@@ -265,133 +265,130 @@ def backtest_ativo_123(ativo, df_filtrado, data_inicial, data_final,
         entrada_target = setup['entrada_target']
         stop_loss = setup['stop_loss']
         
-        # Calcula o take profit (2x o risco)
-        risco = entrada_target - stop_loss
-        take_profit = entrada_target + (2 * risco)
+        # Entrada somente no candle seguinte ao setup (regra solicitada)
+        if setup['index'] + 1 >= len(df):
+            # Não há próximo candle (final do dataset)
+            continue
+        candle_atual = df.iloc[setup['index'] + 1]
         
-        # Procura pela entrada a partir do próximo candle
-        entrada_executada = False
-        for j in range(setup['index'] + 1, len(df)):
-            candle_atual = df.iloc[j]
+        # Verifica gap excessivo na abertura
+        if usar_filtro_gap:
+            candle_anterior = df.iloc[setup['index']]
+            gap_pct = abs(candle_atual["Open"] - candle_anterior["Close"]) / candle_anterior["Close"] * 100
+            if gap_pct > gap_maximo:
+                # Se houver gap excessivo, desarma o setup
+                continue
+        
+        # Verifica se rompeu a máxima (entrada) NO PRÓXIMO CANDLE
+        if candle_atual["High"] >= entrada_target:
+            # Determina preço de entrada
+            if candle_atual["Open"] >= entrada_target:
+                preco_entrada = candle_atual["Open"]
+            else:
+                preco_entrada = entrada_target
             
-            # Verifica gap excessivo na abertura
-            if usar_filtro_gap:
-                candle_anterior = df.iloc[j-1]
-                gap_pct = abs(candle_atual["Open"] - candle_anterior["Close"]) / candle_anterior["Close"] * 100
-                if gap_pct > gap_maximo:
+            # Aplica filtro Éden dos trades corretamente
+            if eden_trades:
+                mme_curta_atual = candle_atual.get(f"MME_{mme_curta}", 0)
+                mme_longa_atual = candle_atual.get(f"MME_{mme_longa}", 0)
+                
+                # Entrada deve ser ACIMA de ambas as MMEs
+                if preco_entrada <= mme_curta_atual or preco_entrada <= mme_longa_atual:
+                    trades_filtrados_eden += 1
+                    # Se não passar no filtro, setup fica desarmado
                     continue
             
-            # Verifica se rompeu a máxima (entrada)
-            if candle_atual["High"] >= entrada_target:
-                # Determina preço de entrada
-                if candle_atual["Open"] >= entrada_target:
-                    preco_entrada = candle_atual["Open"]
+            # Calcula quantidade de ações
+            quantidade = int((capital_inicial // preco_entrada) // 100) * 100
+            if quantidade == 0:
+                # Capital insuficiente para comprar pelo menos 100 ações
+                continue
+            
+            # Recalcula stop e take com base no preço real de entrada
+            risco_real = preco_entrada - stop_loss
+            take_profit_real = preco_entrada + (2 * risco_real)
+            
+            posicao_ativa = True  # MARCA POSIÇÃO COMO ATIVA
+            data_entrada = candle_atual["Date"]
+            dias_hold = 0
+            max_preco = preco_entrada
+            
+            # Acompanha a posição
+            for k in range(setup['index'] + 1, len(df)):
+                candle_pos = df.iloc[k]
+                dias_hold += 1
+                
+                # Atualiza máximo para trailing stop
+                if usar_trailing_stop:
+                    max_preco = max(max_preco, candle_pos["High"])
+                    trailing_stop_price = max_preco * (1 - trailing_pct / 100)
+                    stop_atual = max(stop_loss, trailing_stop_price)
                 else:
-                    preco_entrada = entrada_target
+                    stop_atual = stop_loss
                 
-                # Aplica filtro Éden dos trades corretamente
-                if eden_trades:
-                    # Obtém as MMEs do candle atual
-                    if j < len(df):
-                        candle_para_mme = df.iloc[j]
-                        mme_curta_atual = candle_para_mme.get(f"MME_{mme_curta}", 0)
-                        mme_longa_atual = candle_para_mme.get(f"MME_{mme_longa}", 0)
-                        
-                        # Entrada deve ser ACIMA de ambas as MMEs
-                        if preco_entrada <= mme_curta_atual or preco_entrada <= mme_longa_atual:
-                            trades_filtrados_eden += 1
-                            continue
+                # Verifica saídas
+                sair = False
+                preco_saida = None
+                motivo = ""
                 
-                # Calcula quantidade de ações
-                quantidade = int((capital_inicial // preco_entrada) // 100) * 100
-                if quantidade == 0:
-                    break
+                # 1. Stop Loss
+                if candle_pos["Low"] <= stop_atual:
+                    sair = True
+                    preco_saida = min(candle_pos["Open"], stop_atual)
+                    motivo = "Trailing Stop" if usar_trailing_stop and stop_atual > stop_loss else "Stop Loss"
                 
-                # Recalcula stop e take com base no preço real de entrada
-                risco_real = preco_entrada - stop_loss
-                take_profit_real = preco_entrada + (2 * risco_real)
-                
-                posicao_ativa = True  # MARCA POSIÇÃO COMO ATIVA
-                data_entrada = candle_atual["Date"]
-                dias_hold = 0
-                max_preco = preco_entrada
-                entrada_executada = True
-                
-                # Acompanha a posição
-                for k in range(j, len(df)):
-                    candle_pos = df.iloc[k]
-                    dias_hold += 1
-                    
-                    # Atualiza máximo para trailing stop
-                    if usar_trailing_stop:
-                        max_preco = max(max_preco, candle_pos["High"])
-                        trailing_stop_price = max_preco * (1 - trailing_pct / 100)
-                        stop_atual = max(stop_loss, trailing_stop_price)
+                # 2. Take Profit
+                elif candle_pos["High"] >= take_profit_real:
+                    sair = True
+                    if candle_pos["Open"] >= take_profit_real:
+                        preco_saida = candle_pos["Open"]
                     else:
-                        stop_atual = stop_loss
-                    
-                    # Verifica saídas
-                    sair = False
-                    preco_saida = None
-                    motivo = ""
-                    
-                    # 1. Stop Loss
-                    if candle_pos["Low"] <= stop_atual:
-                        sair = True
-                        preco_saida = min(candle_pos["Open"], stop_atual)
-                        motivo = "Trailing Stop" if usar_trailing_stop and stop_atual > stop_loss else "Stop Loss"
-                    
-                    # 2. Take Profit
-                    elif candle_pos["High"] >= take_profit_real:
-                        sair = True
-                        if candle_pos["Open"] >= take_profit_real:
-                            preco_saida = candle_pos["Open"]
-                        else:
-                            preco_saida = take_profit_real
-                        motivo = "Take Profit"
-                    
-                    # 3. Timeout
-                    elif usar_timeout and max_hold_days and dias_hold >= max_hold_days:
-                        sair = True
-                        preco_saida = candle_pos["Close"]
-                        motivo = "Timeout"
-                    
-                    if sair:
-                        lucro = (preco_saida - preco_entrada) * quantidade
-                        retorno_pct = (preco_saida - preco_entrada) / preco_entrada * 100
-                        
-                        trade_data = {
-                            "Setup Data": setup['data'].strftime("%d/%m/%Y"),
-                            "Data Entrada": data_entrada.strftime("%d/%m/%Y"), 
-                            "Preço Entrada": preco_entrada,
-                            "Data Saída": candle_pos["Date"].strftime("%d/%m/%Y"),
-                            "Preço Saída": preco_saida,
-                            "Stop Loss": stop_loss,
-                            "Take Profit": take_profit_real,
-                            "Dias Hold": dias_hold,
-                            "Quantidade": quantidade,
-                            "Lucro": lucro,
-                            "Retorno %": retorno_pct,
-                            "Motivo": motivo,
-                            "Risco/Recompensa": f"1:2.0",
-                            "Lista": lista_selecionada,
-                            "Padrão": setup['padrao_tipo'],
-                            "Ativo": ativo
-                        }
-                        
-                        if eden_trades:
-                            trade_data[f"MME {mme_curta}"] = mme_curta_atual
-                            trade_data[f"MME {mme_longa}"] = mme_longa_atual
-                            trade_data["Éden Ativo"] = "Sim"
-                        else:
-                            trade_data["Éden Ativo"] = "Não"
-                        
-                        trades.append(trade_data)
-                        posicao_ativa = False  # LIBERA POSIÇÃO PARA PRÓXIMO SETUP
-                        break
+                        preco_saida = take_profit_real
+                    motivo = "Take Profit"
                 
-                if entrada_executada:
+                # 3. Timeout
+                elif usar_timeout and max_hold_days and dias_hold >= max_hold_days:
+                    sair = True
+                    preco_saida = candle_pos["Close"]
+                    motivo = "Timeout"
+                
+                if sair:
+                    lucro = (preco_saida - preco_entrada) * quantidade
+                    retorno_pct = (preco_saida - preco_entrada) / preco_entrada * 100
+                    
+                    trade_data = {
+                        "Setup Data": setup['data'].strftime("%d/%m/%Y"),
+                        "Data Entrada": data_entrada.strftime("%d/%m/%Y"), 
+                        "Preço Entrada": preco_entrada,
+                        "Data Saída": candle_pos["Date"].strftime("%d/%m/%Y"),
+                        "Preço Saída": preco_saida,
+                        "Stop Loss": stop_loss,
+                        "Take Profit": take_profit_real,
+                        "Dias Hold": dias_hold,
+                        "Quantidade": quantidade,
+                        "Lucro": lucro,
+                        "Retorno %": retorno_pct,
+                        "Motivo": motivo,
+                        "Risco/Recompensa": f"1:2.0",
+                        "Lista": lista_selecionada,
+                        "Padrão": setup['padrao_tipo'],
+                        "Ativo": ativo
+                    }
+                    
+                    if eden_trades:
+                        trade_data[f"MME {mme_curta}"] = mme_curta_atual
+                        trade_data[f"MME {mme_longa}"] = mme_longa_atual
+                        trade_data["Éden Ativo"] = "Sim"
+                    else:
+                        trade_data["Éden Ativo"] = "Não"
+                    
+                    trades.append(trade_data)
+                    posicao_ativa = False  # LIBERA POSIÇÃO PARA PRÓXIMO SETUP
                     break
+                
+            # fim do acompanhamento da posição
+        # fim da verificação de rompimento no próximo candle
+    # fim do loop de setups
     
     # Análise dos resultados
     if not trades:
@@ -766,133 +763,147 @@ if st.session_state.backtest_executado:
         resultado_detalhado = next((res for res in st.session_state.melhores_resultados if res["Ativo"] == ativo_selecionado_detalhes), None)
             
         if resultado_detalhado is not None:
-            df_trades_detalhado = resultado_detalhado["df_trades"]
+            df_trades_raw = resultado_detalhado["df_trades"]
             # Verificar se o DataFrame tem registros
-            if isinstance(df_trades_detalhado, pd.DataFrame) and len(df_trades_detalhado) > 0:
+            if isinstance(df_trades_raw, pd.DataFrame) and len(df_trades_raw) > 0:
+                # Filtrar trades exibidos quando o filtro Éden estiver ativo (apenas mostrar trades que passaram no Éden)
+                if eden_trades:
+                    # Garante que a coluna exista e filtra apenas os trades marcados como 'Sim'
+                    if "Éden Ativo" in df_trades_raw.columns:
+                        df_trades = df_trades_raw[df_trades_raw["Éden Ativo"] == "Sim"].copy()
+                    else:
+                        df_trades = df_trades_raw.copy()
+                else:
+                    df_trades = df_trades_raw.copy()
+
                 st.markdown(f"### Trades do ativo {ativo_selecionado_detalhes}")
                 
-                # Informações gerais do ativo
+                # Informações gerais do ativo (refletindo o filtro Éden quando aplicável)
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("Padrões 123 Encontrados", resultado_detalhado["Padrões Encontrados"])
+                    st.metric("Padrões 123 Encontrados", resultado_detalhado.get("Padrões Encontrados", 0))
                 with col2:
-                    st.metric("Trades Executados", resultado_detalhado["Trades"])
+                    st.metric("Trades Executados", len(df_trades))
                 with col3:
-                    st.metric("Trades Filtrados Éden", resultado_detalhado["Trades Filtrados Éden"])
+                    st.metric("Trades Filtrados Éden", resultado_detalhado.get("Trades Filtrados Éden", 0))
                 with col4:
                     eden_status = "Ativo" if eden_trades else "Inativo"
                     st.metric("Filtro Éden", eden_status)
                 
-                # DataFrame com os trades
-                st.dataframe(
-                    df_trades_detalhado.style.format({
-                        "Preço Entrada": "R$ {:.2f}",
-                        "Preço Saída": "R$ {:.2f}",
-                        "Stop Loss": "R$ {:.2f}",
-                        "Take Profit": "R$ {:.2f}",
-                        "Lucro": "R$ {:.2f}",
-                        "Retorno %": "{:.2f}%",
-                        "Capital Acumulado": "R$ {:.2f}"
-                    })
-                )
-                
-                # Curva de Capital
-                st.subheader("📈 Evolução do Capital")
-                fig_cap = go.Figure()
-                
-                # Preparar dados para o gráfico
-                df_trades_ordenado = df_trades_detalhado.copy()
-                df_trades_ordenado["Data Saída Dt"] = pd.to_datetime(df_trades_ordenado["Data Saída"], format="%d/%m/%Y")
-                df_trades_ordenado = df_trades_ordenado.sort_values("Data Saída Dt")
-                df_trades_ordenado["Capital Acumulado Correto"] = capital_inicial + df_trades_ordenado["Lucro"].cumsum()
-                
-                datas_plot = [pd.to_datetime(data_inicial)] + df_trades_ordenado["Data Saída Dt"].tolist()
-                capital_plot = [capital_inicial] + df_trades_ordenado["Capital Acumulado Correto"].tolist()
-                
-                fig_cap.add_trace(go.Scatter(
-                    x=datas_plot,
-                    y=capital_plot,
-                    mode="lines+markers",
-                    name="Capital Acumulado",
-                    line=dict(color="blue", width=2),
-                    marker=dict(size=8, color="blue"),
-                    hovertemplate="<b>Data:</b> %{x}<br><b>Capital:</b> R$ %{y:,.2f}<extra></extra>"
-                ))
-                
-                fig_cap.add_hline(y=capital_inicial, line_dash="dash", line_color="gray", 
-                                  annotation_text=f"Capital Inicial: R$ {capital_inicial:,.2f}")
-                
-                fig_cap.update_layout(
-                    title="Evolução do Capital ao Longo do Tempo",
-                    xaxis_title="Data",
-                    yaxis_title="Capital (R$)",
-                    hovermode="x unified",
-                    height=500,
-                    showlegend=True
-                )
-                
-                st.plotly_chart(fig_cap, width="stretch")
-                
-                # Distribuição dos retornos
-                st.subheader("📊 Distribuição dos Retornos")
-                fig_hist = go.Figure()
-                fig_hist.add_trace(go.Histogram(
-                    x=df_trades_detalhado["Retorno %"],
-                    nbinsx=15,
-                    name="Frequência",
-                    marker_color="lightblue",
-                    opacity=0.7
-                ))
-                
-                fig_hist.update_layout(
-                    title="Distribuição dos Retornos por Operação",
-                    xaxis_title="Retorno (%)",
-                    yaxis_title="Frequência"
-                )
-                
-                st.plotly_chart(fig_hist, width="stretch")
-                
-                # Análise por motivo de saída
-                st.subheader("🎯 Análise por Motivo de Saída")
-                motivos_resumo = df_trades_detalhado.groupby("Motivo").agg({
-                    "Lucro": ["count", "sum", "mean"],
-                    "Retorno %": "mean"
-                }).round(2)
-                
-                motivos_resumo.columns = ["Quantidade", "Lucro Total", "Lucro Médio", "Retorno Médio %"]
-                st.dataframe(motivos_resumo.style.format({
-                    "Lucro Total": "R$ {:.2f}",
-                    "Lucro Médio": "R$ {:.2f}",
-                    "Retorno Médio %": "{:.2f}%"
-                }))
-                
-                # Retorno Mensal
-                st.subheader("📅 Retorno Mensal (Não Acumulado)")
-                
-                df_trades_detalhado["Data Saída Dt"] = pd.to_datetime(df_trades_detalhado["Data Saída"], format="%d/%m/%Y")
-                df_trades_detalhado["AnoMes"] = df_trades_detalhado["Data Saída Dt"].dt.to_period("M").astype(str)
-                
-                retorno_mensal = df_trades_detalhado.groupby("AnoMes")["Lucro"].sum().reset_index()
-                cores_mensal = ["mediumseagreen" if val >= 0 else "indianred" for val in retorno_mensal["Lucro"]]
-                
-                fig_bar = go.Figure(data=[
-                    go.Bar(
-                        x=retorno_mensal["AnoMes"],
-                        y=retorno_mensal["Lucro"],
-                        marker_color=cores_mensal,
-                        text=[f"R$ {v:,.0f}" for v in retorno_mensal["Lucro"]],
-                        textposition="outside",
+                if df_trades.empty:
+                    if eden_trades:
+                        st.info("Não há operações que passaram pelo filtro Éden para este ativo com os parâmetros selecionados.")
+                    else:
+                        st.info("Não há operações registradas para este ativo com os parâmetros selecionados.")
+                else:
+                    # DataFrame com os trades (aplicando formatação)
+                    st.dataframe(
+                        df_trades.style.format({
+                            "Preço Entrada": "R$ {:.2f}",
+                            "Preço Saída": "R$ {:.2f}",
+                            "Stop Loss": "R$ {:.2f}",
+                            "Take Profit": "R$ {:.2f}",
+                            "Lucro": "R$ {:.2f}",
+                            "Retorno %": "{:.2f}%",
+                            "Capital Acumulado": "R$ {:.2f}"
+                        })
                     )
-                ])
-                
-                fig_bar.update_layout(
-                    title="Retorno Mensal (Não Acumulado)",
-                    xaxis_title="Mês",
-                    yaxis_title="Retorno (R$)",
-                    showlegend=False
-                )
-                
-                st.plotly_chart(fig_bar, width="stretch")
+                    
+                    # Curva de Capital usando os trades filtrados
+                    st.subheader("📈 Evolução do Capital")
+                    fig_cap = go.Figure()
+                    
+                    # Preparar dados para o gráfico
+                    df_trades_ordenado = df_trades.copy()
+                    df_trades_ordenado["Data Saída Dt"] = pd.to_datetime(df_trades_ordenado["Data Saída"], format="%d/%m/%Y")
+                    df_trades_ordenado = df_trades_ordenado.sort_values("Data Saída Dt")
+                    df_trades_ordenado["Capital Acumulado Correto"] = capital_inicial + df_trades_ordenado["Lucro"].cumsum()
+                    
+                    datas_plot = [pd.to_datetime(data_inicial)] + df_trades_ordenado["Data Saída Dt"].tolist()
+                    capital_plot = [capital_inicial] + df_trades_ordenado["Capital Acumulado Correto"].tolist()
+                    
+                    fig_cap.add_trace(go.Scatter(
+                        x=datas_plot,
+                        y=capital_plot,
+                        mode="lines+markers",
+                        name="Capital Acumulado",
+                        line=dict(width=2),
+                        marker=dict(size=8),
+                        hovertemplate="<b>Data:</b> %{x}<br><b>Capital:</b> R$ %{y:,.2f}<extra></extra>"
+                    ))
+                    
+                    fig_cap.add_hline(y=capital_inicial, line_dash="dash", line_color="gray", 
+                                      annotation_text=f"Capital Inicial: R$ {capital_inicial:,.2f}")
+                    
+                    fig_cap.update_layout(
+                        title="Evolução do Capital ao Longo do Tempo",
+                        xaxis_title="Data",
+                        yaxis_title="Capital (R$)",
+                        hovermode="x unified",
+                        height=500,
+                        showlegend=True
+                    )
+                    
+                    st.plotly_chart(fig_cap, width="stretch")
+                    
+                    # Distribuição dos retornos
+                    st.subheader("📊 Distribuição dos Retornos")
+                    fig_hist = go.Figure()
+                    fig_hist.add_trace(go.Histogram(
+                        x=df_trades["Retorno %"],
+                        nbinsx=15,
+                        name="Frequência",
+                        opacity=0.7
+                    ))
+                    
+                    fig_hist.update_layout(
+                        title="Distribuição dos Retornos por Operação",
+                        xaxis_title="Retorno (%)",
+                        yaxis_title="Frequência"
+                    )
+                    
+                    st.plotly_chart(fig_hist, width="stretch")
+                    
+                    # Análise por motivo de saída
+                    st.subheader("🎯 Análise por Motivo de Saída")
+                    motivos_resumo = df_trades.groupby("Motivo").agg({
+                        "Lucro": ["count", "sum", "mean"],
+                        "Retorno %": "mean"
+                    }).round(2)
+                    
+                    motivos_resumo.columns = ["Quantidade", "Lucro Total", "Lucro Médio", "Retorno Médio %"]
+                    st.dataframe(motivos_resumo.style.format({
+                        "Lucro Total": "R$ {:.2f}",
+                        "Lucro Médio": "R$ {:.2f}",
+                        "Retorno Médio %": "{:.2f}%"
+                    }))
+                    
+                    # Retorno Mensal
+                    st.subheader("📅 Retorno Mensal (Não Acumulado)")
+                    
+                    df_trades["Data Saída Dt"] = pd.to_datetime(df_trades["Data Saída"], format="%d/%m/%Y")
+                    df_trades["AnoMes"] = df_trades["Data Saída Dt"].dt.to_period("M").astype(str)
+                    
+                    retorno_mensal = df_trades.groupby("AnoMes")["Lucro"].sum().reset_index()
+                    cores_mensal = ["mediumseagreen" if val >= 0 else "indianred" for val in retorno_mensal["Lucro"]]
+                    
+                    fig_bar = go.Figure(data=[
+                        go.Bar(
+                            x=retorno_mensal["AnoMes"],
+                            y=retorno_mensal["Lucro"],
+                            text=[f"R$ {v:,.0f}" for v in retorno_mensal["Lucro"]],
+                            textposition="outside",
+                        )
+                    ])
+                    
+                    fig_bar.update_layout(
+                        title="Retorno Mensal (Não Acumulado)",
+                        xaxis_title="Mês",
+                        yaxis_title="Retorno (R$)",
+                        showlegend=False
+                    )
+                    
+                    st.plotly_chart(fig_bar, width="stretch")
             else:
                 st.info("Não há operações registradas para este ativo com os parâmetros selecionados.")
         else:
