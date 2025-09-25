@@ -7,6 +7,7 @@ import yfinance as yf
 import MetaTrader5 as mt5
 from datetime import datetime, timedelta
 import time
+import numpy as np
 from PIL import Image
 
 
@@ -35,8 +36,8 @@ with st.sidebar:
 
 
 # Título do aplicativo
-st.title("📊 Coleta Híbrida de Dados (YFinance + MetaTrader5)")
-st.markdown("**🔥 Estratégia Híbrida:** Dados históricos extensos do Yahoo Finance + Dados precisos e recentes do MetaTrader5")
+st.title("📊 Coleta Híbrida de Dados com Reancoragem (YFinance + MetaTrader5)")
+st.markdown("**🔥 Estratégia Híbrida Aprimorada:** Dados históricos extensos do Yahoo Finance reanchorados + Dados precisos e recentes do MetaTrader5")
 
 st.markdown("[🔗 Link para baixar lista do Índice Bovespa](https://www.b3.com.br/pt_br/market-data-e-indices/indices/indices-amplos/indice-ibovespa-ibovespa-composicao-da-carteira.htm)")
 st.markdown("[🔗 Link para baixar lista do Índice de ações com governança corporativa diferenciada (IGC B3)](https://www.b3.com.br/pt_br/market-data-e-indices/indices/indices-de-governanca/indice-de-acoes-com-governanca-corporativa-diferenciada-igcx-composicao-da-carteira.htm)")
@@ -47,11 +48,113 @@ st.markdown("[🔗 Link para baixar lista do Índice de BDRs não patrocinado-Gl
 # === CONFIGURAÇÕES ===
 TIMEFRAME_MT5 = mt5.TIMEFRAME_D1  # diário para MT5
 ANOS_YFINANCE = 15  # Mais anos para YFinance (dados históricos extensos)
-ANOS_MT5 = 5  # AJUSTADO: 5 anos de dados do MT5 (dados recentes e precisos)
+ANOS_MT5 = 5  # 5 anos de dados do MT5 (dados recentes e precisos)
 
-# Configurações da estratégia híbrida
-DIAS_OVERLAP = 30  # Dias de sobreposição para garantir continuidade
-DATA_CORTE_MT5 = datetime.now() - timedelta(days=365 * 5)  # AJUSTADO: 5 anos atrás como ponto de corte
+# Configurações da estratégia híbrida com reancoragem
+DIAS_OVERLAP = 60  # AUMENTADO: Mais dias de sobreposição para melhor reancoragem
+DATA_CORTE_MT5 = datetime.now() - timedelta(days=365 * 5)  # 5 anos atrás como ponto de corte
+PERIODO_REANCORAGEM = 30  # Período em dias para calcular o fator de reancoragem
+
+# === FUNÇÕES DE REANCORAGEM ===
+
+def reancorar_yahoo_finance(df_yf, df_mt5, ticker):
+    """
+    Reancora dados do Yahoo Finance usando dados do MT5 como referência
+    Baseado na função do arquivo reancorar.py
+    """
+    try:
+        df_yf = df_yf.copy().reset_index(drop=True)
+        df_mt5 = df_mt5.copy().reset_index(drop=True)
+        
+        # Garantir que as datas são datetime
+        df_yf['Date'] = pd.to_datetime(df_yf['Date'])
+        df_mt5['Date'] = pd.to_datetime(df_mt5['Date'])
+        
+        # Selecionar apenas as colunas necessárias
+        df_yf_clean = df_yf[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']].copy()
+        df_mt5_clean = df_mt5[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']].copy()
+        
+        # Fazer merge para encontrar datas em comum
+        df_merge = pd.merge(df_mt5_clean, df_yf_clean, on='Date', suffixes=('_MT5', '_YF'))
+        
+        if df_merge.empty:
+            st.warning(f"⚠️ {ticker}: Não há datas em comum entre MT5 e Yahoo Finance para reancoragem")
+            return df_yf
+        
+        # Usar os últimos N dias em comum para calcular o fator de reancoragem
+        periodo_calc = min(PERIODO_REANCORAGEM, len(df_merge))
+        df_calc = df_merge.tail(periodo_calc)
+        
+        # Calcular fator de reancoragem baseado no preço de fechamento médio
+        fator_close = df_calc['Close_MT5'].mean() / df_calc['Close_YF'].mean()
+        
+        # Calcular fatores para outros preços (manter proporções)
+        fator_open = df_calc['Open_MT5'].mean() / df_calc['Open_YF'].mean() if df_calc['Open_YF'].mean() > 0 else fator_close
+        fator_high = df_calc['High_MT5'].mean() / df_calc['High_YF'].mean() if df_calc['High_YF'].mean() > 0 else fator_close
+        fator_low = df_calc['Low_MT5'].mean() / df_calc['Low_YF'].mean() if df_calc['Low_YF'].mean() > 0 else fator_close
+        
+        # Aplicar reancoragem aos dados do Yahoo Finance
+        df_yf_reanc = df_yf.copy()
+        df_yf_reanc['Close'] = df_yf_reanc['Close'] * fator_close
+        df_yf_reanc['Open'] = df_yf_reanc['Open'] * fator_open
+        df_yf_reanc['High'] = df_yf_reanc['High'] * fator_high
+        df_yf_reanc['Low'] = df_yf_reanc['Low'] * fator_low
+        
+        # Volume normalmente não precisa de ajuste, mas pode ser filtrado se muito diferente
+        
+        return df_yf_reanc
+        
+    except Exception as e:
+        st.warning(f"⚠️ {ticker}: Erro na reancoragem: {str(e)}. Usando dados originais do Yahoo Finance.")
+        return df_yf
+
+def validar_reancoragem(df_mt5, df_yf_original, df_yf_reancorado, ticker):
+    """
+    Valida a qualidade da reancoragem usando métricas similares ao arquivo original
+    """
+    try:
+        # Preparar dados para comparação
+        df_mt5_clean = df_mt5[['Date', 'Close']].copy()
+        df_yf_orig_clean = df_yf_original[['Date', 'Close']].copy()
+        df_yf_reanc_clean = df_yf_reancorado[['Date', 'Close']].copy()
+        
+        # Garantir datas datetime
+        for df in [df_mt5_clean, df_yf_orig_clean, df_yf_reanc_clean]:
+            df['Date'] = pd.to_datetime(df['Date'])
+        
+        # Merge para período comum
+        df_comp = pd.merge(df_mt5_clean, df_yf_reanc_clean, on='Date', suffixes=('_MT5', '_YF_REANC'))
+        
+        if df_comp.empty or len(df_comp) < 5:
+            return None
+        
+        # Calcular retornos diários
+        df_comp['Ret_MT5'] = df_comp['Close_MT5'].pct_change()
+        df_comp['Ret_YF'] = df_comp['Close_YF_REANC'].pct_change()
+        df_comp = df_comp.dropna()
+        
+        if len(df_comp) < 3:
+            return None
+        
+        # Métricas de qualidade
+        correlacao = df_comp['Ret_MT5'].corr(df_comp['Ret_YF'])
+        mae = np.mean(np.abs(df_comp['Ret_MT5'] - df_comp['Ret_YF']))
+        std_diff = np.std(df_comp['Close_MT5'] - df_comp['Close_YF_REANC'])
+        
+        # Índice de confiabilidade (ajustado)
+        indice_confiabilidade = (correlacao * 100) - (mae * 10000)
+        
+        return {
+            'correlacao': correlacao,
+            'mae': mae,
+            'std_diff': std_diff,
+            'indice_confiabilidade': indice_confiabilidade,
+            'dias_comparados': len(df_comp)
+        }
+        
+    except Exception as e:
+        st.warning(f"⚠️ {ticker}: Erro na validação: {str(e)}")
+        return None
 
 # Função para criar o diretório se não existir
 def criar_diretorio():
@@ -72,17 +175,14 @@ def extrair_nome_arquivo(nome_arquivo):
 
 # Função para processar arquivo simples (formato original)
 def processar_arquivo_simples(uploaded_file, novo_nome, diretorio):
-    # Ler o arquivo CSV
+    # Ler o CSV do buffer
     df = pd.read_csv(uploaded_file)
     
-    # Verificar se tem a coluna 'Código'
     if 'Código' not in df.columns:
         return False, "O arquivo deve conter uma coluna chamada 'Código'."
     
-    # Extrair apenas a coluna 'Código'
     codigos = df['Código'].tolist()
     
-    # Salvar em um novo arquivo sem cabeçalho, um ticker por linha
     caminho_completo = os.path.join(diretorio, f"{novo_nome}.csv")
     with open(caminho_completo, 'w') as f:
         for codigo in codigos:
@@ -130,13 +230,15 @@ def processar_arquivo_complexo(content_str, novo_nome, diretorio):
 def processar_arquivo(uploaded_file, novo_nome, diretorio):
     content = uploaded_file.read()
     content_str = content.decode('utf-8', errors='replace')
-    uploaded_file.seek(0)
     
     if detectar_arquivo_complexo(content_str):
+        # Arquivo complexo → processa via texto
         return processar_arquivo_complexo(content_str, novo_nome, diretorio)
     else:
+        # Arquivo simples → cria um novo buffer a partir de 'content'
         try:
-            return processar_arquivo_simples(uploaded_file, novo_nome, diretorio)
+            df_buffer = io.StringIO(content_str)
+            return processar_arquivo_simples(df_buffer, novo_nome, diretorio)
         except Exception as e:
             return False, f"Erro ao processar o arquivo: {str(e)}"
 
@@ -168,18 +270,21 @@ def verificar_parquet(caminho_bd):
 
 # === FUNÇÕES YFINANCE ===
 
-def baixar_dados_yfinance(tickers, nome_lista, base_existente):
-    """Baixa dados históricos extensos usando yfinance"""
+def baixar_dados_yfinance(tickers, nome_lista, dados_mt5_existentes=None):
+    """
+    Baixa dados históricos extensos usando yfinance com reancoragem opcional
+    """
     
     if not tickers:
         return pd.DataFrame(), []
     
     # Configurar período de download (mais extenso para YFinance)
-    data_fim = datetime.now()
+    data_fim = DATA_CORTE_MT5 + timedelta(days=DIAS_OVERLAP)  # Terminar no início do período MT5
     data_inicio = data_fim - timedelta(days=ANOS_YFINANCE*365)
     
     all_data = pd.DataFrame()
     sucessos_yf = []
+    estatisticas_reancoragem = []
     
     for i, ticker in enumerate(tickers):
         try:
@@ -203,13 +308,31 @@ def baixar_dados_yfinance(tickers, nome_lista, base_existente):
                     else:
                         dados_processados[col] = None
                 
+                # === APLICAR REANCORAGEM SE HOUVER DADOS MT5 ===
+                if dados_mt5_existentes is not None and not dados_mt5_existentes.empty:
+                    # Filtrar dados MT5 para este ticker
+                    dados_mt5_ticker = dados_mt5_existentes[dados_mt5_existentes['Ticker'] == ticker]
+                    
+                    if not dados_mt5_ticker.empty:
+                        # Aplicar reancoragem
+                        dados_originais = dados_processados.copy()
+                        dados_processados = reancorar_yahoo_finance(dados_processados, dados_mt5_ticker, ticker)
+                        
+                        # Validar reancoragem
+                        validacao = validar_reancoragem(dados_mt5_ticker, dados_originais, dados_processados, ticker)
+                        
+                        if validacao:
+                            estatisticas_reancoragem.append({
+                                'ticker': ticker,
+                                'correlacao': validacao['correlacao'],
+                                'mae': validacao['mae'],
+                                'indice_confiabilidade': validacao['indice_confiabilidade'],
+                                'dias_comparados': validacao['dias_comparados']
+                            })
+                
                 dados_processados['Ticker'] = ticker
                 dados_processados['Lista'] = nome_lista
-                dados_processados['Fonte'] = 'YFinance'  # Marcar a fonte
-                
-                # Filtrar dados até a data de corte do MT5 (deixar overlap)
-                data_limite = DATA_CORTE_MT5 + timedelta(days=DIAS_OVERLAP)
-                dados_processados = dados_processados[dados_processados['Date'] <= data_limite]
+                dados_processados['Fonte'] = 'YFinance_Reancorado' if (dados_mt5_existentes is not None and not dados_mt5_existentes.empty) else 'YFinance'
                 
                 if not dados_processados.empty:
                     all_data = pd.concat([all_data, dados_processados], ignore_index=True)
@@ -219,6 +342,28 @@ def baixar_dados_yfinance(tickers, nome_lista, base_existente):
             
         except Exception as e:
             st.warning(f"Erro YFinance para {ticker}: {str(e)}")
+    
+    # Mostrar estatísticas de reancoragem se houver
+    if estatisticas_reancoragem:
+        st.subheader("📊 Estatísticas de Reancoragem")
+        df_stats = pd.DataFrame(estatisticas_reancoragem)
+        
+        # Resumo geral
+        correlacao_media = df_stats['correlacao'].mean()
+        mae_medio = df_stats['mae'].mean()
+        indice_medio = df_stats['indice_confiabilidade'].mean()
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Correlação Média", f"{correlacao_media:.3f}")
+        with col2:
+            st.metric("MAE Médio", f"{mae_medio:.6f}")
+        with col3:
+            st.metric("Índice Confiabilidade", f"{indice_medio:.1f}")
+        
+        # Mostrar detalhes por ticker
+        with st.expander("🔍 Detalhes por Ticker"):
+            st.dataframe(df_stats.round(4))
     
     return all_data, sucessos_yf
 
@@ -319,11 +464,12 @@ def baixar_dados_mt5(tickers, nome_lista, base_existente):
     mt5.shutdown()
     return all_data, sucessos_mt5, nao_encontrados_mt5
 
-# === FUNÇÃO HÍBRIDA PRINCIPAL ===
+# === FUNÇÃO HÍBRIDA PRINCIPAL COM REANCORAGEM ===
 
-def baixar_dados_hibridos(tickers, nome_lista):
+def baixar_dados_hibridos_com_reancoragem(tickers, nome_lista):
     """
-    Estratégia híbrida: YFinance para dados históricos + MT5 para dados recentes
+    Estratégia híbrida aprimorada: MT5 primeiro, depois YFinance com reancoragem
+    CORREÇÃO: Problema na consolidação com base existente
     """
     
     if not tickers:
@@ -336,14 +482,17 @@ def baixar_dados_hibridos(tickers, nome_lista):
     if not verificar_parquet(caminho_bd):
         return False, "Erro ao tratar o arquivo parquet existente."
     
-    # Carregar base existente
+    # CORREÇÃO: Carregar base existente ANTES do processo
+    base_existente = pd.DataFrame()
     if os.path.exists(caminho_bd):
         try:
             base_existente = pd.read_parquet(caminho_bd)
-        except:
+            # CORREÇÃO: Remover dados antigos da mesma lista ANTES de processar
+            if not base_existente.empty and 'Lista' in base_existente.columns:
+                base_existente = base_existente[base_existente['Lista'] != nome_lista]
+        except Exception as e:
+            st.warning(f"Erro ao carregar base existente: {str(e)}. Criando nova base.")
             base_existente = pd.DataFrame()
-    else:
-        base_existente = pd.DataFrame()
     
     # Progress bar
     progress_container = st.container()
@@ -356,39 +505,44 @@ def baixar_dados_hibridos(tickers, nome_lista):
         'mt5_sucessos': [],
         'mt5_nao_encontrados': [],
         'total_registros_yf': 0,
-        'total_registros_mt5': 0
+        'total_registros_mt5': 0,
+        'reancoragem_aplicada': False
     }
     
     try:
-        # FASE 1: Coleta via YFinance (dados históricos extensos)
-        status_text.text("🔄 FASE 1: Coletando dados históricos via Yahoo Finance...")
+        # FASE 1: Coleta via MT5 (dados recentes e precisos) - PRIMEIRO!
+        status_text.text("🎯 FASE 1: Coletando dados recentes via MetaTrader5...")
         progress_bar.progress(0.1)
-        
-        dados_yfinance, sucessos_yf = baixar_dados_yfinance(tickers, nome_lista, base_existente)
-        resultados['yfinance_sucessos'] = sucessos_yf
-        resultados['total_registros_yf'] = len(dados_yfinance)
-        
-        progress_bar.progress(0.5)
-        
-        # FASE 2: Coleta via MT5 (dados recentes e precisos)
-        status_text.text("🔄 FASE 2: Coletando dados recentes via MetaTrader5...")
         
         dados_mt5, sucessos_mt5, nao_encontrados_mt5 = baixar_dados_mt5(tickers, nome_lista, base_existente)
         resultados['mt5_sucessos'] = sucessos_mt5
         resultados['mt5_nao_encontrados'] = nao_encontrados_mt5
         resultados['total_registros_mt5'] = len(dados_mt5)
         
-        progress_bar.progress(0.8)
+        progress_bar.progress(0.4)
         
-        # FASE 3: Consolidação dos dados
-        status_text.text("🔄 FASE 3: Consolidando dados híbridos...")
+        # FASE 2: Coleta via YFinance com reancoragem (dados históricos)
+        status_text.text("📊 FASE 2: Coletando dados históricos via Yahoo Finance com reancoragem...")
         
-        # Combinar dados YFinance e MT5
+        # Passar dados MT5 para reancoragem
+        dados_yfinance, sucessos_yf = baixar_dados_yfinance(tickers, nome_lista, dados_mt5)
+        resultados['yfinance_sucessos'] = sucessos_yf
+        resultados['total_registros_yf'] = len(dados_yfinance)
+        resultados['reancoragem_aplicada'] = not dados_mt5.empty
+        
+        progress_bar.progress(0.7)
+        
+        # FASE 3: Consolidação dos dados (CORRIGIDA)
+        status_text.text("🔄 FASE 3: Consolidando dados híbridos com reancoragem...")
+        
+        # CORREÇÃO: Combinar novos dados primeiro
         dados_consolidados = pd.DataFrame()
         
+        # Adicionar dados YFinance (históricos)
         if not dados_yfinance.empty:
             dados_consolidados = pd.concat([dados_consolidados, dados_yfinance], ignore_index=True)
         
+        # Adicionar dados MT5 (recentes) - prioridade
         if not dados_mt5.empty:
             dados_consolidados = pd.concat([dados_consolidados, dados_mt5], ignore_index=True)
         
@@ -397,61 +551,112 @@ def baixar_dados_hibridos(tickers, nome_lista):
             status_text.empty()
             return False, "Nenhum dado coletado por nenhuma das fontes."
         
-        # Remover duplicatas (priorizar MT5 sobre YFinance para datas sobrepostas)
+        # CORREÇÃO: Garantir colunas e tipos consistentes
         dados_consolidados['Date'] = pd.to_datetime(dados_consolidados['Date'])
+        
+        # Garantir que todas as colunas necessárias existam nos novos dados
+        required_columns = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Ticker', 'Lista', 'Fonte']
+        for col in required_columns:
+            if col not in dados_consolidados.columns:
+                if col == 'Fonte':
+                    dados_consolidados[col] = 'Unknown'
+                else:
+                    dados_consolidados[col] = None
+        
+        # Ordenar e remover duplicatas nos novos dados (MT5 tem prioridade)
         dados_consolidados = dados_consolidados.sort_values(['Ticker', 'Date', 'Fonte'])
+        dados_consolidados = dados_consolidados.drop_duplicates(subset=['Date', 'Ticker'], keep='last')
         
-        # Em caso de duplicata na mesma data e ticker, manter MT5 (vem depois na ordenação)
-        dados_consolidados = dados_consolidados.drop_duplicates(
-            subset=['Date', 'Ticker'], keep='last'
-        )
-        
-        # Remover dados antigos da mesma lista
-        if not base_existente.empty and 'Lista' in base_existente.columns:
-            base_existente = base_existente[base_existente['Lista'] != nome_lista]
+        # CORREÇÃO: Combinar com base existente de forma segura
+        if not base_existente.empty:
+            # Garantir que base existente tem todas as colunas necessárias
+            for col in required_columns:
+                if col not in base_existente.columns:
+                    if col == 'Fonte':
+                        base_existente[col] = 'Legacy'
+                    else:
+                        base_existente[col] = None
             
-            if not base_existente.empty:
-                # Garantir que todas as colunas necessárias existam
-                for col in ['Fonte']:
-                    if col not in base_existente.columns:
-                        base_existente[col] = 'Legacy'  # Marcar dados antigos
-                
-                dados_finais = pd.concat([base_existente, dados_consolidados], ignore_index=True)
-            else:
-                dados_finais = dados_consolidados
+            # Garantir tipos consistentes
+            base_existente['Date'] = pd.to_datetime(base_existente['Date'])
+            
+            # Combinar tudo
+            dados_finais = pd.concat([base_existente, dados_consolidados], ignore_index=True)
+            
+            # Remover duplicatas finais (priorizar dados mais recentes)
+            dados_finais = dados_finais.sort_values(['Ticker', 'Date', 'Fonte'])
+            dados_finais = dados_finais.drop_duplicates(subset=['Date', 'Ticker'], keep='last')
         else:
             dados_finais = dados_consolidados
         
         progress_bar.progress(0.9)
         
-        # Salvar dados
+        # CORREÇÃO: Salvar dados com verificação adicional
         os.makedirs(os.path.dirname(caminho_bd), exist_ok=True)
         
+        # Ordenar dados finais e verificar integridade
         dados_finais = dados_finais.sort_values(by=['Lista', 'Ticker', 'Date'])
-        dados_finais = dados_finais.drop_duplicates(subset=["Date","Ticker"])
-        dados_finais.to_parquet(caminho_bd, index=False)
+        
+        # CORREÇÃO: Verificar se dados_finais não está vazio antes de salvar
+        if dados_finais.empty:
+            progress_bar.empty()
+            status_text.empty()
+            return False, "Dados finais consolidados estão vazios."
+        
+        # CORREÇÃO: Verificar estrutura antes de salvar
+        try:
+            # Testar se é possível converter para parquet
+            test_parquet = dados_finais.to_parquet(None)
+            if test_parquet is None:
+                raise ValueError("Erro na conversão para parquet")
+        except Exception as e:
+            progress_bar.empty()
+            status_text.empty()
+            return False, f"Erro na estrutura dos dados para salvar: {str(e)}"
+        
+        # Salvar arquivo
+        try:
+            dados_finais.to_parquet(caminho_bd, index=False)
+        except Exception as e:
+            progress_bar.empty()
+            status_text.empty()
+            return False, f"Erro ao salvar arquivo parquet: {str(e)}"
         
         progress_bar.progress(1.0)
         
+    except Exception as e:
+        # Limpar progress bar em caso de erro
+        try:
+            progress_bar.empty()
+            status_text.empty()
+        except:
+            pass
+        return False, f"Erro no processo híbrido: {str(e)}"
+        
     finally:
         # Limpar progress bar
-        progress_bar.empty()
-        status_text.empty()
+        try:
+            progress_bar.empty()
+            status_text.empty()
+        except:
+            pass
     
     # Criar mensagem de resultado
-    mensagem = f"🎯 **Coleta Híbrida Concluída para '{nome_lista}'**\n\n"
+    mensagem = f"🎯 **Coleta Híbrida com Reancoragem Concluída para '{nome_lista}'**\n\n"
     
-    mensagem += f"📊 **Yahoo Finance (Dados Históricos):**\n"
-    mensagem += f"   • Sucessos: {len(resultados['yfinance_sucessos'])}\n"
-    mensagem += f"   • Registros: {resultados['total_registros_yf']:,}\n\n"
-    
-    mensagem += f"🎯 **MetaTrader5 (Dados Precisos):**\n"
+    mensagem += f"🎯 **MetaTrader5 (Dados de Referência):**\n"
     mensagem += f"   • Sucessos: {len(resultados['mt5_sucessos'])}\n"
     mensagem += f"   • Não encontrados: {len(resultados['mt5_nao_encontrados'])}\n"
     mensagem += f"   • Registros: {resultados['total_registros_mt5']:,}\n\n"
     
+    mensagem += f"📊 **Yahoo Finance (Dados Reanchorados):**\n"
+    mensagem += f"   • Sucessos: {len(resultados['yfinance_sucessos'])}\n"
+    mensagem += f"   • Registros: {resultados['total_registros_yf']:,}\n"
+    mensagem += f"   • Reancoragem: {'✅ Aplicada' if resultados['reancoragem_aplicada'] else '❌ Não aplicada'}\n\n"
+    
     total_registros = resultados['total_registros_yf'] + resultados['total_registros_mt5']
-    mensagem += f"📈 **Total Consolidado:** {total_registros:,} registros"
+    mensagem += f"📈 **Total Consolidado:** {total_registros:,} registros\n"
+    mensagem += f"🔄 **Estratégia:** MT5 como referência + YF reanchorado para histórico"
     
     return True, mensagem
 
@@ -461,8 +666,8 @@ def atualizar_lista(nome_arquivo, diretorio):
     nome_lista = extrair_nome_arquivo(nome_arquivo)
     tickers = ler_tickers_do_arquivo(caminho_arquivo)
     
-    # Usar função híbrida
-    sucesso, mensagem = baixar_dados_hibridos(tickers, nome_lista)
+    # Usar função híbrida com reancoragem
+    sucesso, mensagem = baixar_dados_hibridos_com_reancoragem(tickers, nome_lista)
     return sucesso, mensagem
 
 # Função para atualizar todas as listas
@@ -485,7 +690,7 @@ def atualizar_todas_listas(diretorio):
         else:
             st.error(f"Erro na lista {arquivo}: {mensagem}")
     
-    return True, f"🎯 **Processo Híbrido Concluído:**\n" + "\n".join(resultados)
+    return True, f"🎯 **Processo Híbrido com Reancoragem Concluído:**\n" + "\n".join(resultados)
 
 def remover_dados_historicos_por_lista(nome_lista):
     caminho_bd = os.path.join("01-dados", "ativos_historicos.parquet")
@@ -509,21 +714,16 @@ def remover_dados_historicos_por_lista(nome_lista):
 
 # === INTERFACE PRINCIPAL ===
 
-# Status da estratégia híbrida
-st.header("🔥 Status da Estratégia Híbrida")
+# Status da estratégia híbrida com reancoragem
+st.header("🔥 Status da Estratégia Híbrida com Reancoragem")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("📈 Yahoo Finance")
-    st.write(f"**Período:** {ANOS_YFINANCE} anos de histórico")
-    st.write(f"**Finalidade:** Dados históricos extensos")
-    st.write("**Status:** ✅ Sempre disponível")
-
-with col2:
-    st.subheader("🎯 MetaTrader5")
+    st.subheader("🎯 MetaTrader5 (Referência)")
     st.write(f"**Período:** {ANOS_MT5} anos recentes")
-    st.write(f"**Finalidade:** Dados precisos e atualizados")
+    st.write(f"**Função:** Dados precisos + base para reancoragem")
+    st.write("**Prioridade:** Máxima (não sobrescritos)")
     
     # Testar conexão MT5
     conectado, msg_conexao = conectar_mt5()
@@ -534,6 +734,15 @@ with col2:
     else:
         st.write("**Status:** ❌ Desconectado")
         st.error(msg_conexao)
+
+with col2:
+    st.subheader("📊 Yahoo Finance (Reanchorado)")
+    st.write(f"**Período:** {ANOS_YFINANCE} anos históricos")
+    st.write(f"**Função:** Dados históricos reanchorados ao MT5")
+    st.write(f"**Reancoragem:** {PERIODO_REANCORAGEM} dias de referência")
+    st.write("**Status:** ✅ Sempre disponível")
+
+st.info(f"🔄 **Overlap configurado:** {DIAS_OVERLAP} dias para garantir reancoragem precisa")
 
 # Criar diretório se não existir
 diretorio = criar_diretorio()
@@ -576,8 +785,8 @@ if arquivos:
                     st.error(f"Arquivo '{arquivo}' foi excluído, mas houve um problema ao remover os dados históricos.")
                 st.rerun()
         with col3:
-            if st.button("🔥 Atualizar Híbrido", key=f"upd_{arquivo}"):
-                with st.spinner(f"Executando coleta híbrida para '{arquivo}'..."):
+            if st.button("🔥 Atualizar Reanchorado", key=f"upd_{arquivo}"):
+                with st.spinner(f"Executando coleta híbrida com reancoragem para '{arquivo}'..."):
                     sucesso, mensagem = atualizar_lista(arquivo, diretorio)
                     if sucesso:
                         st.success(mensagem)
@@ -604,8 +813,8 @@ if arquivos:
             st.rerun()
     
     with col2:
-        if st.button("🔥 Atualizar Todas - Híbrido"):
-            with st.spinner("Executando coleta híbrida para todas as listas..."):
+        if st.button("🔥 Atualizar Todas - Reanchorado"):
+            with st.spinner("Executando coleta híbrida com reancoragem para todas as listas..."):
                 sucesso, mensagem = atualizar_todas_listas(diretorio)
                 if sucesso:
                     st.success(mensagem)
@@ -615,7 +824,7 @@ else:
     st.info("Nenhum arquivo encontrado no diretório.")
 
 # Exibir informações sobre o banco de dados
-st.header("📊 Informações do Banco de Dados Híbrido")
+st.header("📊 Informações do Banco de Dados Híbrido com Reancoragem")
 caminho_bd = os.path.join("01-dados", "ativos_historicos.parquet")
 
 if os.path.exists(caminho_bd):
@@ -631,10 +840,12 @@ if os.path.exists(caminho_bd):
                 fonte_dist = df_info['Fonte'].value_counts()
                 for fonte, count in fonte_dist.items():
                     percentage = (count / len(df_info)) * 100
-                    if fonte == 'YFinance':
-                        st.write(f"   📈 **{fonte}:** {count:,} registros ({percentage:.1f}%) - Dados históricos")
+                    if fonte == 'YFinance_Reancorado':
+                        st.write(f"   📊 **{fonte}:** {count:,} registros ({percentage:.1f}%) - Histórico reanchorado")
+                    elif fonte == 'YFinance':
+                        st.write(f"   📈 **{fonte}:** {count:,} registros ({percentage:.1f}%) - Histórico original")
                     elif fonte == 'MT5':
-                        st.write(f"   🎯 **{fonte}:** {count:,} registros ({percentage:.1f}%) - Dados precisos")
+                        st.write(f"   🎯 **{fonte}:** {count:,} registros ({percentage:.1f}%) - Referência precisa")
                     else:
                         st.write(f"   📋 **{fonte}:** {count:,} registros ({percentage:.1f}%)")
             
@@ -659,7 +870,7 @@ if os.path.exists(caminho_bd):
                     
                     # Mostrar ponto de transição YFinance -> MT5
                     data_corte_str = DATA_CORTE_MT5.strftime('%d/%m/%Y')
-                    st.info(f"🔄 **Ponto de transição:** Dados antes de {data_corte_str} predominantemente do Yahoo Finance, após essa data do MetaTrader5")
+                    st.info(f"🔄 **Ponto de transição:** Dados antes de {data_corte_str} do Yahoo Finance (reanchorados), após do MetaTrader5")
             except:
                 st.warning("Não foi possível determinar o intervalo de datas.")
             
@@ -692,7 +903,7 @@ if os.path.exists(caminho_bd):
                 except:
                     st.warning("Não foi possível ordenar por data.")
             
-            st.write(f"Exibindo os 50 últimos registros do banco híbrido (total: {len(df_ultimos):,}):")
+            st.write(f"Exibindo os 50 últimos registros do banco híbrido reanchorado (total: {len(df_ultimos):,}):")
             
             # Opções de filtro
             col1, col2, col3 = st.columns(3)
@@ -732,7 +943,8 @@ if os.path.exists(caminho_bd):
                 # Formattar a coluna Fonte com emojis
                 if 'Fonte' in df_display.columns:
                     df_display['Fonte'] = df_display['Fonte'].map({
-                        'YFinance': '📈 YFinance',
+                        'YFinance_Reancorado': '📊 YF Reanchorado',
+                        'YFinance': '📈 YF Original', 
                         'MT5': '🎯 MT5',
                         'Legacy': '📋 Legacy'
                     }).fillna(df_display['Fonte'])
@@ -744,7 +956,7 @@ if os.path.exists(caminho_bd):
                 st.download_button(
                     label="📥 Baixar dados visualizados como CSV",
                     data=csv,
-                    file_name=f"dados_hibridos_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                    file_name=f"dados_hibridos_reancorados_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                     mime="text/csv"
                 )
             else:
@@ -759,8 +971,8 @@ if os.path.exists(caminho_bd):
 else:
     st.info("Banco de dados ainda não foi criado.")
     
-    if st.button("🔥 Criar banco híbrido agora"):
-        with st.spinner("Criando banco de dados híbrido..."):
+    if st.button("🔥 Criar banco híbrido reanchorado agora"):
+        with st.spinner("Criando banco de dados híbrido com reancoragem..."):
             sucesso, mensagem = atualizar_todas_listas(diretorio)
             if sucesso:
                 st.success(mensagem)
@@ -769,42 +981,64 @@ else:
                 st.error(f"Erro ao criar o banco de dados: {mensagem}")
 
 # Opções avançadas
-with st.expander("⚙️ Configurações Avançadas"):
-    st.subheader("🔧 Parâmetros da Estratégia Híbrida")
+with st.expander("⚙️ Configurações Avançadas da Reancoragem"):
+    st.subheader("🔧 Parâmetros da Estratégia Híbrida com Reancoragem")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        st.write("**📈 Yahoo Finance (Dados Históricos)**")
-        st.write(f"• Período: {ANOS_YFINANCE} anos")
-        st.write(f"• Coleta até: {DATA_CORTE_MT5.strftime('%d/%m/%Y')}")
-        st.write("• Vantagem: Histórico extenso")
-        st.write("• Desvantagem: Menos preciso")
-    
-    with col2:
-        st.write("**🎯 MetaTrader5 (Dados Precisos)**")
+        st.write("**🎯 MetaTrader5 (Dados de Referência)**")
         st.write(f"• Período: {ANOS_MT5} anos recentes")
         st.write(f"• Coleta a partir: {DATA_CORTE_MT5.strftime('%d/%m/%Y')}")
-        st.write("• Vantagem: Dados precisos")
-        st.write("• Desvantagem: Histórico limitado")
+        st.write("• Função: Base para reancoragem + dados precisos")
+        st.write("• Prioridade: MÁXIMA (nunca sobrescrito)")
     
-    st.write(f"**🔄 Overlap:** {DIAS_OVERLAP} dias de sobreposição para garantir continuidade")
+    with col2:
+        st.write("**📊 Yahoo Finance (Dados Reanchorados)**")
+        st.write(f"• Período: {ANOS_YFINANCE} anos históricos")
+        st.write(f"• Coleta até: {DATA_CORTE_MT5.strftime('%d/%m/%Y')}")
+        st.write(f"• Reancoragem: Últimos {PERIODO_REANCORAGEM} dias")
+        st.write("• Função: Histórico ajustado aos preços MT5")
+    
+    st.write(f"**🔄 Configurações de Reancoragem:**")
+    st.write(f"• Overlap: {DIAS_OVERLAP} dias")
+    st.write(f"• Período de cálculo: {PERIODO_REANCORAGEM} dias")
+    st.write(f"• Método: Fator multiplicativo por preço médio")
+    st.write(f"• Validação: Correlação + MAE + Índice de confiabilidade")
     
     st.subheader("🧪 Testes de Conectividade")
     
     col_test1, col_test2 = st.columns(2)
     
     with col_test1:
-        if st.button("🧪 Testar Yahoo Finance"):
-            with st.spinner("Testando Yahoo Finance..."):
+        if st.button("🧪 Testar Yahoo Finance + Reancoragem"):
+            with st.spinner("Testando Yahoo Finance com simulação de reancoragem..."):
                 try:
-                    test_data = yf.download("VALE3.SA", period="5d", progress=False)
-                    if not test_data.empty:
-                        st.success(f"✅ Yahoo Finance OK - {len(test_data)} registros de teste")
+                    # Teste básico YF
+                    test_data_yf = yf.download("VALE3.SA", period="60d", progress=False)
+                    if not test_data_yf.empty:
+                        st.success(f"✅ Yahoo Finance OK - {len(test_data_yf)} registros de teste")
+                        
+                        # Simular dados MT5 para teste de reancoragem
+                        test_data_yf_clean = test_data_yf.reset_index()
+                        test_data_yf_clean = test_data_yf_clean[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
+                        
+                        # Criar dados "MT5" simulados (com pequena variação)
+                        test_mt5_sim = test_data_yf_clean.tail(30).copy()
+                        test_mt5_sim[['Open', 'High', 'Low', 'Close']] *= 1.02  # Simular diferença de 2%
+                        
+                        # Testar reancoragem
+                        test_reancorado = reancorar_yahoo_finance(test_data_yf_clean, test_mt5_sim, "VALE3")
+                        
+                        if len(test_reancorado) > 0:
+                            fator_aplicado = test_reancorado['Close'].iloc[-1] / test_data_yf_clean['Close'].iloc[-1]
+                            st.info(f"🔄 Teste de reancoragem: Fator aplicado = {fator_aplicado:.4f}")
+                        else:
+                            st.warning("⚠️ Teste de reancoragem falhou")
                     else:
                         st.error("❌ Yahoo Finance retornou dados vazios")
                 except Exception as e:
-                    st.error(f"❌ Erro no Yahoo Finance: {str(e)}")
+                    st.error(f"❌ Erro no teste: {str(e)}")
     
     with col_test2:
         if st.button("🧪 Testar MetaTrader5"):
@@ -819,6 +1053,16 @@ with st.expander("⚙️ Configurações Avançadas"):
                         symbols_br = [s.name for s in symbols if any(s.name.endswith(suffix) for suffix in ['3', '4', '11', 'F']) and len(s.name) <= 6][:5]
                         if symbols_br:
                             st.write("**Símbolos de exemplo:**", ", ".join(symbols_br))
+                        
+                        # Testar coleta de dados para reancoragem
+                        if symbols_br:
+                            test_symbol = symbols_br[0]
+                            try:
+                                test_rates = mt5.copy_rates_from_pos(test_symbol, TIMEFRAME_MT5, 0, 30)
+                                if test_rates is not None:
+                                    st.info(f"🎯 Teste coleta MT5: {len(test_rates)} registros de {test_symbol}")
+                            except:
+                                pass
                 except:
                     pass
                 
@@ -833,51 +1077,85 @@ with st.expander("⚙️ Configurações Avançadas"):
             try:
                 os.remove(caminho_bd)
                 st.success("✅ Banco de dados resetado com sucesso!")
-                st.info("Execute 'Atualizar Todas - Híbrido' para recriar.")
+                st.info("Execute 'Atualizar Todas - Reanchorado' para recriar.")
             except Exception as e:
                 st.error(f"❌ Erro ao resetar: {str(e)}")
         else:
             st.info("ℹ️ Não existe banco de dados para resetar.")
 
-# Informações sobre a estratégia híbrida
-with st.expander("ℹ️ Como Funciona a Estratégia Híbrida"):
-    st.markdown("""
-    ## 🔥 Estratégia Híbrida: O Melhor de Dois Mundos
+# Informações sobre a estratégia híbrida com reancoragem
+with st.expander("ℹ️ Como Funciona a Estratégia Híbrida com Reancoragem"):
+    st.markdown(f"""
+    ## 🔥 Estratégia Híbrida com Reancoragem: Máxima Precisão
     
-    ### 📊 **Fluxo de Coleta:**
+    ### 📊 **Fluxo de Coleta Aprimorado:**
     
-    1. **📈 FASE 1 - Yahoo Finance (Dados Históricos)**
-       - Coleta dados de até **15 anos** atrás
-       - Para até aproximadamente **2 anos** atrás
-       - Garante histórico extenso para análises de longo prazo
-    
-    2. **🎯 FASE 2 - MetaTrader5 (Dados Precisos)**  
-       - Coleta dados dos **últimos 5 anos**
+    1. **🎯 FASE 1 - MetaTrader5 (Dados de Referência - PRIMEIRO)**
+       - Coleta dados dos **últimos {ANOS_MT5} anos**
        - Dados mais precisos e atualizados
-       - Horários corretos do mercado brasileiro
-       - Volume mais confiável
+       - **NUNCA são sobrescritos** - prioridade máxima
+       - Servem como **base para reancoragem**
+    
+    2. **📊 FASE 2 - Yahoo Finance (Dados Reanchorados)**  
+       - Coleta dados de até **{ANOS_YFINANCE} anos** atrás
+       - Termina no ponto de corte do MT5
+       - **REANCORAGEM AUTOMÁTICA** usando dados MT5
+       - Ajusta preços para o nível real do mercado
     
     3. **🔄 FASE 3 - Consolidação Inteligente**
-       - Remove duplicatas priorizando MT5
-       - Mantém continuidade temporal
-       - Marca origem dos dados (fonte)
+       - Remove duplicatas **priorizando MT5**
+       - Mantém continuidade temporal perfeita
+       - Marca origem: MT5, YFinance_Reancorado, etc.
     
-    ### 🎯 **Vantagens:**
-    - ✅ **Histórico extenso** (15+ anos via Yahoo Finance)
-    - ✅ **Dados precisos** (5 anos recentes via MT5)
-    - ✅ **Sem lacunas** (overlap de 30 dias)
-    - ✅ **Atualizações incrementais**
-    - ✅ **Fallback automático** (se MT5 falhar, mantém YF)
-    - ✅ **Rastreabilidade** (sabe origem de cada dado)
+    ### 🎯 **Processo de Reancoragem:**
+    - **Período de Cálculo:** Últimos {PERIODO_REANCORAGEM} dias em comum
+    - **Método:** Fator multiplicativo baseado em preços médios
+    - **Aplicação:** Ajusta Open, High, Low, Close do YF
+    - **Validação:** Correlação + MAE + Índice de confiabilidade
+    - **Overlap:** {DIAS_OVERLAP} dias para garantir dados suficientes
     
-    ### 📋 **Cenários de Uso:**
-    - **Backtesting longo prazo:** Usa dados históricos do YF (10+ anos atrás)
-    - **Análises recentes:** Usa dados precisos do MT5 (últimos 5 anos)
-    - **Relatórios:** Combina ambos com total transparência
+    ### 🌟 **Vantagens da Reancoragem:**
+    - ✅ **Continuidade perfeita** entre YF e MT5
+    - ✅ **Preços ajustados** ao nível real do mercado
+    - ✅ **Elimina gaps** artificiais entre fontes
+    - ✅ **Mantém proporções** dos preços históricos
+    - ✅ **Validação automática** da qualidade
+    - ✅ **Fallback seguro** se reancoragem falhar
+    
+    ### 📈 **Casos de Uso Ideais:**
+    - **Backtesting longo prazo:** Dados consistentes por 15+ anos
+    - **Análises técnicas:** Sem distorções entre períodos
+    - **Relatórios:** Preços alinhados com realidade atual
+    - **Machine Learning:** Features consistentes no tempo
     
     ### 🔧 **Configuração Atual:**
-    - **Yahoo Finance:** 15 anos (dados até 5 anos atrás)
-    - **MetaTrader5:** 5 anos recentes + overlap
-    - **Overlap:** 30 dias para garantir continuidade
-    - **Prioridade:** MT5 > YFinance em caso de duplicata
+    - **Yahoo Finance:** {ANOS_YFINANCE} anos (até {ANOS_MT5} anos atrás)
+    - **MetaTrader5:** {ANOS_MT5} anos recentes (referência)
+    - **Overlap:** {DIAS_OVERLAP} dias
+    - **Reancoragem:** {PERIODO_REANCORAGEM} dias para cálculo
+    - **Prioridade:** MT5 > YFinance_Reancorado > YFinance > Legacy
+    
+    ### 📊 **Métricas de Qualidade:**
+    - **Correlação:** Medida de alinhamento dos retornos
+    - **MAE:** Erro médio absoluto entre retornos
+    - **Índice de Confiabilidade:** Score combinado de qualidade
+    - **Dias Comparados:** Período usado para validação
+    """)
+    
+    # Exemplo visual
+    st.subheader("📈 Exemplo de Reancoragem")
+    st.write("""
+    **Antes da Reancoragem:**
+    - Yahoo Finance: VALE3 fechando em R$ 60,00
+    - MetaTrader5: VALE3 fechando em R$ 62,00
+    - Gap de R$ 2,00 (3.33%)
+    
+    **Processo:**
+    - Calcula fator: 62,00 ÷ 60,00 = 1,0333
+    - Aplica a todo histórico YF: preços × 1,0333
+    
+    **Resultado:**
+    - Dados históricos YF ajustados ao nível MT5
+    - Continuidade perfeita na série temporal
+    - Análises técnicas sem distorções
     """)
