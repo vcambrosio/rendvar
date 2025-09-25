@@ -489,7 +489,7 @@ def backtest_ativo_123(ativo, df_filtrado, data_inicial, data_final,
         "Ganho Médio": ganho_medio,
         "Perda Média": perda_media,
         "Padrões Encontrados": padroes_encontrados,
-        "Trades Filtrados Éden": trades_filtrados_eden
+        "Trades Filtrados Éden": total_ops if eden_trades else 0
     }
 
 # === EXECUÇÃO DO BACKTEST ===
@@ -588,7 +588,7 @@ if st.session_state.backtest_executado:
             "% Trades Lucrativos (Mínimo)", 
             min_value=0, 
             max_value=100,
-            value=st.session_state.get("Filtro_min_perc_lucrativos", 60),
+            value=st.session_state.get("Filtro_min_perc_lucrativos", 20),
             step=1,
             key="Filtro_min_perc_lucrativos"
         )
@@ -598,7 +598,7 @@ if st.session_state.backtest_executado:
             "Drawdown Máximo (%)", 
             min_value=0, 
             max_value=50,
-            value=st.session_state.get("Filtro_max_drawdown", 15),
+            value=st.session_state.get("Filtro_max_drawdown", 20),
             step=1,
             key="Filtro_max_drawdown"
         )
@@ -618,7 +618,7 @@ if st.session_state.backtest_executado:
             "Número Mínimo de Trades", 
             min_value=0, 
             max_value=50,
-            value=st.session_state.get("Filtro_min_trades", 3),
+            value=st.session_state.get("Filtro_min_trades", 1),
             step=1,
             key="Filtro_min_trades"
         )
@@ -630,8 +630,8 @@ if st.session_state.backtest_executado:
             "Fator de Lucro Mínimo", 
             min_value=0.0, 
             max_value=10.0,
-            value=st.session_state.get("Filtro_min_fator_lucro", 1.5),
-            step=0.1,
+            value=st.session_state.get("Filtro_min_fator_lucro", 1.0),
+            step=0.5,
             key="Filtro_min_fator_lucro"
         )
 
