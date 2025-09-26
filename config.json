@@ -1,1 +1,1 @@
-{"ranking_file": "ranking_last.txt", "sma_period": 200, "ema_period": 21, "rsi_period": 2, "hist_period": "360d", "max_to_send": 5}
+{"ranking_file": "ranking_last.txt", "sma_period": 200, "ema_period": 21, "rsi_period": 2, "hist_period": "120d", "max_to_send": 5}
