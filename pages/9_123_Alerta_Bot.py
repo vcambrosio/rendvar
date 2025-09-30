@@ -237,7 +237,7 @@ if st.button("▶️ Executar setup 123 Compra agora"):
 st.subheader("📂 Copiar para Servidor")
 
 # Caminho Samba (visível pela sua máquina)
-server_path_ui = st.text_input("Pasta servidor (Samba)", "/mnt/samba/telegram_bots")
+server_path_ui = st.text_input("Pasta servidor (Samba)", r"H:\codigos\telegram_bots")
 
 # Caminho real no Linux (usado no cron)
 server_path_real = st.text_input("Pasta servidor (Linux)", "/mnt/dados/codigos/telegram_bots")

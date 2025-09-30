@@ -2,7 +2,7 @@ import streamlit as st
 import yfinance as yf
 import requests
 from datetime import datetime
-import os, json, sys, shutil, glob, traceback
+import os, json, sys, shutil, traceback
 
 # === CONFIG PADRÃO ===
 CONFIG_FILE = "config.json"
@@ -94,7 +94,10 @@ def run_rsi_from_config(config):
                           config["rsi_period"], config["hist_period"])
         if r: resultados.append(r)
     if not resultados:
-        return "Nenhum ativo passou nos filtros."
+        return (
+            "SETUP IFR2 \n"
+            "Nenhum ativo passou nos filtros."
+        )   
     resultados.sort(key=lambda x: x["ld"], reverse=True)
     top = resultados[:config["max_to_send"]]
     msg = f"SETUP RSI - TOP {len(top)}\nData: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
@@ -105,8 +108,7 @@ def run_rsi_from_config(config):
         msg += f"Preço=R${r['price']:.2f}\nEMA{config['ema_period']}=R${r['ema']} ({dist})\nSMA{config['sma_period']}=R${r['sma']}\n────────────\n"
     return msg
 
-# === COPIAR PARA SERVIDOR (VERSÃO MODIFICADA) ===
-# === COPIAR PARA SERVIDOR (VERSÃO MODIFICADA) ===
+# === COPIAR PARA SERVIDOR (CORRIGIDO) ===
 def copy_to_server(server_path_ui, server_path_real):
     logs = []
     try:
@@ -117,7 +119,6 @@ def copy_to_server(server_path_ui, server_path_real):
 import requests, json, os
 from datetime import datetime
 
-# Caminho base no servidor (usado pelo cron no Linux)
 BASE_PATH = r"{server_path_real}"
 CONFIG_FILE = os.path.join(BASE_PATH, "config.json")
 RANKING_FILE = os.path.join(BASE_PATH, "ranking_last.txt")
@@ -206,7 +207,11 @@ def run_rsi_from_config(config):
                           config["rsi_period"], config["hist_period"])
         if r: resultados.append(r)
     if not resultados:
-        return "Nenhum ativo passou nos filtros."
+        return (
+            "SETUP IFR2 \\n"
+            "Nenhum ativo passou nos filtros."
+        )   
+
     resultados.sort(key=lambda x: x["ld"], reverse=True)
     top = resultados[:config["max_to_send"]]
     msg = f"SETUP RSI - TOP {{len(top)}}\\nData: {{datetime.now().strftime('%d/%m/%Y %H:%M')}}\\n\\n"
@@ -214,7 +219,7 @@ def run_rsi_from_config(config):
         dist = f"{{r['dist_to_ema']:+.2f}}%" if r['dist_to_ema'] is not None else "N/A"
         msg += f"{{r['symbol']}} | LD={{r['ld']:.2f}}\\n"
         msg += f"RSI={{r['rsi']}} (<{{r['rsi_ref']}})\\n"
-        msg += f"Preço=R${{r['price']:.2f}}\\nEMA{{config['ema_period']}}=R${{r['ema']}} ({{dist}})\\nSMA{{config['sma_period']}}=R${{r['sma']}}\\n─────────────\\n"
+        msg += f"Preço=R${{r['price']:.2f}}\\nEMA{{config['ema_period']}}=R${{r['ema']}} ({{dist}})\\nSMA{{config['sma_period']}}=R${{r['sma']}}\\n────────────\\n"
     return msg
 
 if __name__ == "__main__":
@@ -234,13 +239,17 @@ if __name__ == "__main__":
             f.write(server_code)
         logs.append(f"Gerado app_rsi.py em {dest_main}")
 
-        # Copiar também os arquivos auxiliares
+        # === Copiar config.json e ranking_last.txt da raiz do projeto ===
+        script_dir = os.path.dirname(os.path.abspath(__file__))  # ...\rendvar\pages
+        base_dir = os.path.dirname(script_dir)  # sobe 1 nível -> ...\rendvar
+
         for extra in ["config.json", "ranking_last.txt"]:
-            if os.path.exists(extra):
-                shutil.copy2(extra, os.path.join(server_path_ui, extra))
+            src = os.path.join(base_dir, extra)
+            if os.path.exists(src):
+                shutil.copy2(src, os.path.join(server_path_ui, extra))
                 logs.append(f"{extra} copiado para {server_path_ui}")
             else:
-                logs.append(f"⚠️ Arquivo {extra} não encontrado no diretório local.")
+                logs.append(f"⚠️ Arquivo {extra} não encontrado em {src}")
 
         logs.append("Conteúdo destino (Samba): " + ", ".join(os.listdir(server_path_ui)))
         return "\n".join(logs)
@@ -248,7 +257,6 @@ if __name__ == "__main__":
     except Exception as e:
         return f"Erro ao copiar: {e}\n" + traceback.format_exc()
 
- 
 
 # === STREAMLIT (MANTIDO ORIGINAL) ===
 st.title("📊 RSI Bot - Configurações")
@@ -261,7 +269,7 @@ if uploaded_file:
 sma_period = st.number_input("SMA", 50, 300, 200, 1)
 ema_period = st.number_input("EMA", 5, 50, 21, 1)
 rsi_period = st.number_input("RSI", 2, 20, 2, 1)
-hist_period = st.selectbox("Histórico", ["120d","180d","360d"], index=0)
+hist_period = st.selectbox("Histórico", ["120d","180d","360d"], index=2)
 max_to_send = st.slider("Qtd máx ativos", 1, 10, 5)
 
 if st.button("💾 Salvar Configuração RSI"):
@@ -288,8 +296,8 @@ if st.button("▶️ Executar RSI Agora"):
 
 st.subheader("📂 Copiar para Servidor")
 
-# Caminho que você enxerga pelo Samba (ex.: /mnt/samba/telegram_bots)
-server_path_ui = st.text_input("Pasta servidor mapeado no Samba)", "/mnt/samba/telegram_bots")
+# Caminho que você enxerga pelo Samba (ex.: H:\codigos\telegram_bots)
+server_path_ui = st.text_input("Pasta servidor mapeado no Samba", r"H:\codigos\telegram_bots")
 
 # Caminho real no Linux onde o cron vai rodar (ex.: /mnt/dados/codigos/telegram_bots)
 server_path_real = st.text_input("Pasta servidor (Linux)-usado para rodar o crond", "/mnt/dados/codigos/telegram_bots")
